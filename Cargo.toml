@@ -1,0 +1,15 @@
+[package]
+name = "llm-rs"
+version = "0.0.0"
+edition = "2024"
+
+[dependencies]
+memmap2 = "0.9"
+globset = "0.4"
+rand = "0.9"
+
+digit-layout = "0.3"
+ndarray-layout = "0.2"
+mem-rearrange = "0.1"
+itertools = "0.14"
+gemm = "0.18"
