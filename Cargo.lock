@@ -363,9 +363,9 @@ dependencies = [
 
 [[package]]
 name = "ndarray-layout"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df759bf296a502d21f7b213b6cffc6dd732e8a0915b160814af6c43863754eed"
+checksum = "80158db245d69d05d4397d6fe81cada0db87189cde118fd53dab51a0a46ccb5a"
 
 [[package]]
 name = "num-complex"
