@@ -6,7 +6,7 @@ mod nn;
 use blob::Blob;
 use context::Context;
 use digit_layout::types;
-use llmc::{DataLoader, Tokenizer};
+use llmc::{DataLoader, Tokenizer, safe_print};
 
 type Tensor<T> = tensor::Tensor<T, 4>;
 
@@ -57,10 +57,14 @@ fn main() {
                 let logits = ctx.forward("gpt2", &mut gpt2, [tokens.share()]);
                 let losses = ctx.forward("loss", &mut loss, [logits[0].clone(), targets.share()]);
 
-                println!("{}", losses[0].read().as_deref());
-                std::process::exit(0);
-
-                // val_loss += gpt2.forward(inputs, Some(targets));
+                val_loss += losses[0]
+                    .read()
+                    .as_deref()
+                    .merge(0, 2)
+                    .vector::<f32>()
+                    .iter()
+                    .sum::<f32>()
+                    / (batch_size * seq_len) as f32
             }
             val_loss /= 5.;
             println!("step: {step}, val_loss: {val_loss}");
@@ -68,19 +72,16 @@ fn main() {
 
         if step > 0 && step % 20 == 0 {
             println!("-----------");
-            // let mut gen_tokens = vec![tokenizer.eos; batch_size * seq_len];
-            //     for t in 1..64 {
-            //         gpt2.forward(&gen_tokens, None);
-            //         let probs = gpt2
-            //             .acts
-            //             .probs
-            //             .as_slice()
-            //             .index(&[0, t - 1])
-            //             .vector::<f32>();
-            //         let next = sample(probs, rand::random());
-            //         gen_tokens[t] = next as u16;
-            //         safe_print(tokenizer.decode(next as u16));
-            //     }
+            let mut tokens = vec![tokenizer.eos; batch_size * seq_len];
+            for t in 1..64 {
+                let tokens_ =
+                    Tensor::new(types::U16, &[batch_size, seq_len]).map(|_| Blob::from(&*tokens));
+                let logits = ctx.forward("gpt2", &mut gpt2, [tokens_.share()]);
+                let logits = logits[0].read().as_deref().index(&[0, t - 1]).vector();
+                let next = sample(&logits[..n_voc], rand::random());
+                tokens[t] = next as u16;
+                safe_print(tokenizer.decode(next as u16))
+            }
             println!();
             println!("-----------");
         }
@@ -91,4 +92,28 @@ fn main() {
         // ctx.backward("gpt2", &gpt2, vec![]);
         // gpt2.update(1e-4, 0.9, 0.999, 1e-8, 0., step + 1);
     }
+}
+
+fn sample(logits: &[f32], coin: f32) -> u16 {
+    let mut pairs = logits.iter().copied().enumerate().collect::<Vec<_>>();
+    pairs.sort_by(|(_, a), (_, b)| f32::total_cmp(a, b).reverse());
+
+    let max = pairs[0].1;
+    pairs[0].1 = 1.;
+
+    for i in 1..pairs.len() {
+        pairs[i].1 = pairs[i - 1].1 + (pairs[i].1 - max).exp()
+    }
+
+    let &[.., (_, sum)] = &*pairs else {
+        unreachable!()
+    };
+
+    let plimit = sum * coin;
+    for (i, acc) in pairs {
+        if acc >= plimit {
+            return i as _;
+        }
+    }
+    unreachable!()
 }

@@ -5,7 +5,7 @@ use crate::Tensor;
 use digit_layout::types;
 
 pub use data_loader::DataLoader;
-pub use tokenizer::Tokenizer;
+pub use tokenizer::{Tokenizer, safe_print};
 
 struct BinHeader([i32; 256]);
 
