@@ -143,6 +143,7 @@ impl NeuralNetwork for Gpt2Blk {
 
         destruct!([d] = d);
         add(d.write().as_deref_mut(), dresidual.read().as_deref());
+        d.release();
         let dresidual = d;
 
         let d = [dresidual.clone()];
@@ -153,6 +154,7 @@ impl NeuralNetwork for Gpt2Blk {
 
         destruct!([d] = d);
         add(d.write().as_deref_mut(), dresidual.read().as_deref());
+        d.release();
 
         vec![d]
     }

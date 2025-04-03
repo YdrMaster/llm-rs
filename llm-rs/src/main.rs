@@ -17,7 +17,7 @@ fn main() {
     let batch_size = 4;
     let seq_len = 64;
 
-    let _train_loader = DataLoader::new(
+    let mut train_loader = DataLoader::new(
         "/home/mechdancer/repos/llm.c",
         "*/tiny_shakespeare_train.bin",
         batch_size,
@@ -86,10 +86,26 @@ fn main() {
             println!("-----------");
         }
 
-        // let [inputs, targets] = train_loader.load();
-        // let mean_loss = gpt2.forward(inputs, Some(targets));
-        // gpt2.zero_grad();
-        // ctx.backward("gpt2", &gpt2, vec![]);
+        let [inputs, targets] = train_loader.load();
+
+        let shape = [batch_size, seq_len];
+        let tokens = Tensor::new(types::U16, &shape).map(|_| inputs.into());
+        let targets = Tensor::new(types::U16, &shape).map(|_| targets.into());
+
+        let logits = ctx.forward("gpt2", &mut gpt2, [tokens.share()]);
+        let losses = ctx.forward("loss", &mut loss, [logits[0].clone(), targets.share()]);
+        ctx.zero_grad();
+
+        let dloss_mean = 1. / (batch_size * seq_len) as f32;
+        let mut dlosses = Tensor::contiguous_of(losses[0].read()).map(Blob::new);
+        dlosses
+            .as_deref_mut()
+            .merge(0, 2)
+            .vector_mut::<f32>()
+            .fill(dloss_mean);
+
+        let dlogits = ctx.backward("loss", &mut loss, [dlosses.share()]);
+        let _ = ctx.backward("gpt2", &mut gpt2, dlogits);
         // gpt2.update(1e-4, 0.9, 0.999, 1e-8, 0., step + 1);
     }
 }

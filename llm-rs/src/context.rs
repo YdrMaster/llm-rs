@@ -55,6 +55,12 @@ impl Context {
             })
             .clone()
     }
+
+    pub fn zero_grad(&mut self) {
+        for info in self.weights.values_mut() {
+            let _ = info.gradient.take();
+        }
+    }
 }
 
 impl Context {

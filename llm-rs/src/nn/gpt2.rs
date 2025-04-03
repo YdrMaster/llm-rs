@@ -1,6 +1,5 @@
 ﻿use super::{
     NeuralNetwork, embedding::Embedding, gpt2_blk::Gpt2Blk, layer_norm::LayerNorm, linear::Linear,
-    macros::destruct,
 };
 use crate::{Blob, Context, Tensor, llmc};
 use tensor::rw_rc::RwRc;
@@ -66,9 +65,7 @@ impl NeuralNetwork for Gpt2 {
             lm_head,
         } = self;
 
-        destruct!([tokens] = inputs);
-
-        let x = ctx.forward(EMBEDDING, embedding, [tokens]);
+        let x = ctx.forward(EMBEDDING, embedding, inputs);
 
         let x = blks
             .iter_mut()
@@ -81,17 +78,25 @@ impl NeuralNetwork for Gpt2 {
 
     fn backward(
         &mut self,
-        _inputs: impl IntoIterator<Item = RwRc<Tensor<Blob>>>,
-        _ctx: &mut Context,
+        inputs: impl IntoIterator<Item = RwRc<Tensor<Blob>>>,
+        ctx: &mut Context,
     ) -> Vec<RwRc<Tensor<Blob>>> {
-        // let mut d_ = vec![Tensor::new(types::F32, &[]).map(Blob::new)];
+        let Self {
+            embedding,
+            blks,
+            output_norm,
+            lm_head,
+        } = self;
 
-        // for (i, blk) in self.blks.iter().enumerate() {
-        //     d_ = ctx.backward(BLK(i), blk, d_);
-        // }
+        let d = ctx.backward(LM_HEAD, lm_head, inputs);
+        let d = ctx.backward(OUTPUT_NORM, output_norm, d);
 
-        // ctx.backward(EMBEDDING, &self.embedding, d_);
+        let d = blks
+            .iter_mut()
+            .enumerate()
+            .rev()
+            .fold(d, |d, (i, blk)| ctx.backward(BLK(i), blk, d));
 
-        vec![]
+        ctx.backward(EMBEDDING, embedding, d)
     }
 }

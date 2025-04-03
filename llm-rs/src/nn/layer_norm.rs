@@ -75,7 +75,7 @@ impl NeuralNetwork for LayerNorm {
 
         let x = x.take().unwrap();
         let x = x.read();
-        let mut dx = Tensor::contiguous_of(x).map(Blob::new);
+        let mut dx = Tensor::contiguous_of(x).map(Blob::new_zeroed);
 
         backward(
             dx.as_deref_mut(),

@@ -49,10 +49,23 @@ impl NeuralNetwork for Loss {
 
     fn backward(
         &mut self,
-        _inputs: impl IntoIterator<Item = RwRc<Tensor<Blob>>>,
+        inputs: impl IntoIterator<Item = RwRc<Tensor<Blob>>>,
         _ctx: &mut Context,
     ) -> Vec<RwRc<Tensor<Blob>>> {
-        todo!()
+        destruct!([dlosses] = inputs);
+        let Self { targets, probs, .. } = self;
+
+        let probs = probs.take().unwrap();
+        let mut dlogits = Tensor::contiguous_of(&probs).map(Blob::new_zeroed);
+
+        backward(
+            dlogits.as_deref_mut(),
+            dlosses.read().as_deref(),
+            probs.as_deref(),
+            targets.take().unwrap().read().as_deref(),
+        );
+
+        vec![dlogits.share()]
     }
 }
 
@@ -106,6 +119,39 @@ fn crossentropy(mut losses: Tensor<&mut [u8]>, probs: Tensor<&[u8]>, targets: Te
             let probs = probs.as_deref().index(&[b, t]).vector::<f32>();
             let target = targets.as_deref().index(&[b, t]).scalar::<u16>();
             *losses = -probs[*target as usize].ln()
+        }
+    }
+}
+
+fn backward(
+    mut dlogits: Tensor<&mut [u8]>,
+    dlosses: Tensor<&[u8]>,
+    probs: Tensor<&[u8]>,
+    targets: Tensor<&[u8]>,
+) {
+    let dt = unique(&[dlogits.dt(), dlosses.dt(), probs.dt()]).unwrap();
+    assert_eq!(dt, types::F32);
+    assert_eq!(targets.dt(), types::U16);
+
+    dims!([batch_size_0, n_seq_0, n_voc_0] = dlogits);
+    dims!([batch_size_1, n_seq_1] = dlosses);
+    dims!([batch_size_2, n_seq_2, n_voc_1] = probs);
+    dims!([batch_size_3, n_seq_3] = targets);
+
+    let batch_size = unique(&[batch_size_0, batch_size_1, batch_size_2, batch_size_3]).unwrap();
+    let n_seq = unique(&[n_seq_0, n_seq_1, n_seq_2, n_seq_3]).unwrap();
+    let _ = unique(&[n_voc_0, n_voc_1]).unwrap();
+
+    for b in 0..batch_size {
+        for t in 0..n_seq {
+            let dlogits = dlogits.as_deref_mut().index(&[b, t]).vector_mut::<f32>();
+            let probs = probs.as_deref().index(&[b, t]).vector::<f32>();
+            let dloss = *dlosses.as_deref().index(&[b, t]).scalar::<f32>();
+            let ix = *targets.as_deref().index(&[b, t]).scalar::<u16>() as usize;
+            for (i, (dlogit, prob)) in zip(dlogits, probs).enumerate() {
+                let indicator = if i == ix { 1. } else { 0. };
+                *dlogit += (prob - indicator) * dloss
+            }
         }
     }
 }

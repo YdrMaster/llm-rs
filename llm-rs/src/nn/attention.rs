@@ -63,11 +63,11 @@ impl NeuralNetwork for Attention {
 
         let x = x.take().unwrap();
         let x = x.read();
-        let mut dx = Tensor::contiguous_of(x).map(Blob::new);
+        let mut dx = Tensor::contiguous_of(x).map(Blob::new_zeroed);
 
         let att = att.take().unwrap();
-        let mut dpreatt = Tensor::contiguous_of(&att).map(Blob::new);
-        let mut datt = Tensor::contiguous_of(&att).map(Blob::new);
+        let mut dpreatt = Tensor::contiguous_of(&att).map(Blob::new_zeroed);
+        let mut datt = Tensor::contiguous_of(&att).map(Blob::new_zeroed);
 
         backward(
             dx.as_deref_mut(),
