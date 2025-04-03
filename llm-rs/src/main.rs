@@ -6,37 +6,39 @@ mod optimizer;
 
 use blob::Blob;
 use context::Context;
-use digit_layout::types;
-use llmc::{DataLoader, Tokenizer, safe_print};
-use optimizer::AdamW;
 
 type Tensor<T> = tensor::Tensor<T, 4>;
 
 fn main() {
+    use digit_layout::types;
+    use llmc::{DataLoader, Tokenizer, safe_print};
     use memmap2::Mmap;
+    use optimizer::AdamW;
     use std::fs::File;
+    use std::{env::args, path::PathBuf, time::Instant};
 
+    let bin_path = PathBuf::from(args().nth(1).unwrap());
     let batch_size = 4;
     let seq_len = 64;
 
     let mut train_loader = DataLoader::new(
-        "/home/mechdancer/repos/llm.c",
+        &bin_path,
         "*/tiny_shakespeare_train.bin",
         batch_size,
         seq_len,
-        false,
+        true,
     );
     let mut val_loader = DataLoader::new(
-        "/home/mechdancer/repos/llm.c",
+        &bin_path,
         "*/tiny_shakespeare_val.bin",
         batch_size,
         seq_len,
         false,
     );
-    let tokenizer = Tokenizer::new("/home/mechdancer/repos/llm.c/gpt2_tokenizer.bin").unwrap();
+    let tokenizer = Tokenizer::new(bin_path.join("gpt2_tokenizer.bin")).unwrap();
     assert_eq!(tokenizer.decode(tokenizer.eos), br"<|endoftext|>");
 
-    let file = File::open("/home/mechdancer/repos/llm.c/gpt2_124M.bin").unwrap();
+    let file = File::open(bin_path.join("gpt2_124M.bin")).unwrap();
     let mmap = unsafe { Mmap::map(&file) }.unwrap();
     let gpt2 = llmc::Gpt2::new(&mmap);
     let n_voc = gpt2.config.n_voc;
@@ -60,17 +62,10 @@ fn main() {
                 let logits = ctx.forward("gpt2", &mut gpt2, [tokens.share()]);
                 let losses = ctx.forward("loss", &mut loss, [logits[0].clone(), targets.share()]);
 
-                val_loss += losses[0]
-                    .read()
-                    .as_deref()
-                    .merge(0, 2)
-                    .vector::<f32>()
-                    .iter()
-                    .sum::<f32>()
-                    / (batch_size * seq_len) as f32
+                val_loss += loss_sum(losses[0].read().as_deref())
             }
             val_loss /= 5.;
-            println!("step: {step}, val_loss: {val_loss}");
+            println!("val_loss: {val_loss}")
         }
 
         if step > 0 && step % 20 == 0 {
@@ -86,8 +81,10 @@ fn main() {
                 safe_print(tokenizer.decode(next as u16))
             }
             println!();
-            println!("-----------");
+            println!("-----------")
         }
+
+        let time = Instant::now();
 
         let [inputs, targets] = train_loader.load();
 
@@ -97,6 +94,7 @@ fn main() {
 
         let logits = ctx.forward("gpt2", &mut gpt2, [tokens.share()]);
         let losses = ctx.forward("loss", &mut loss, [logits[0].clone(), targets.share()]);
+        let train_loss = loss_sum(losses[0].read().as_deref());
         ctx.zero_grad();
 
         let dloss_mean = 1. / (batch_size * seq_len) as f32;
@@ -110,8 +108,18 @@ fn main() {
         let dlogits = ctx.backward("loss", &mut loss, [dlosses.share()]);
         let _ = ctx.backward("gpt2", &mut gpt2, dlogits);
         ctx.update(&mut adamw);
-        adamw.next()
+        adamw.next();
+
+        println!(
+            "step {step}: train loss {train_loss} (took {:?})",
+            time.elapsed()
+        )
     }
+}
+
+fn loss_sum(losses: Tensor<&[u8]>) -> f32 {
+    let losses = losses.merge(0, 2).vector::<f32>();
+    losses.iter().sum::<f32>() / losses.len() as f32
 }
 
 fn sample(logits: &[f32], coin: f32) -> u16 {
