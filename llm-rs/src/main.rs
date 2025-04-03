@@ -2,11 +2,13 @@ mod blob;
 mod context;
 mod llmc;
 mod nn;
+mod optimizer;
 
 use blob::Blob;
 use context::Context;
 use digit_layout::types;
 use llmc::{DataLoader, Tokenizer, safe_print};
+use optimizer::AdamW;
 
 type Tensor<T> = tensor::Tensor<T, 4>;
 
@@ -42,6 +44,7 @@ fn main() {
     let mut ctx = Context::new();
     let mut gpt2 = ctx.init::<nn::gpt2::Gpt2>("gpt2", gpt2.map(Blob::from));
     let mut loss = ctx.init::<nn::loss::Loss>("loss", n_voc);
+    let mut adamw = AdamW::new(1e-4, 0.9, 0.999, 1e-8, 0.);
 
     for step in 0..=40 {
         if step % 10 == 0 {
@@ -106,7 +109,8 @@ fn main() {
 
         let dlogits = ctx.backward("loss", &mut loss, [dlosses.share()]);
         let _ = ctx.backward("gpt2", &mut gpt2, dlogits);
-        // gpt2.update(1e-4, 0.9, 0.999, 1e-8, 0., step + 1);
+        ctx.update(&mut adamw);
+        adamw.next()
     }
 }
 

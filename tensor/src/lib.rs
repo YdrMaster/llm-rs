@@ -68,6 +68,10 @@ impl<T, const N: usize> Tensor<T, N> {
         &self.layout
     }
 
+    pub fn take(self) -> T {
+        self.data
+    }
+
     pub const fn get(&self) -> &T {
         &self.data
     }

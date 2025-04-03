@@ -1,4 +1,4 @@
-﻿use crate::{Blob, Tensor, nn::NeuralNetwork};
+﻿use crate::{Blob, Tensor, nn::NeuralNetwork, optimizer::Optimizer};
 use std::collections::{HashMap, HashSet};
 use tensor::rw_rc::{RwRc, RwWeak};
 
@@ -59,6 +59,14 @@ impl Context {
     pub fn zero_grad(&mut self) {
         for info in self.weights.values_mut() {
             let _ = info.gradient.take();
+        }
+    }
+
+    pub fn update(&self, optimizer: &mut impl Optimizer) {
+        for (weak, info) in &self.weights {
+            let weight = weak.hold().unwrap();
+            let gradient = info.gradient.clone().unwrap();
+            optimizer.update(weight, gradient)
         }
     }
 }
