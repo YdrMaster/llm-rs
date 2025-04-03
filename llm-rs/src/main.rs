@@ -37,21 +37,28 @@ fn main() {
     let file = File::open("/home/mechdancer/repos/llm.c/gpt2_124M.bin").unwrap();
     let mmap = unsafe { Mmap::map(&file) }.unwrap();
     let gpt2 = llmc::Gpt2::new(&mmap);
+    let n_voc = gpt2.config.n_voc;
 
     let mut ctx = Context::new();
     let mut gpt2 = ctx.init::<nn::gpt2::Gpt2>("gpt2", gpt2.map(Blob::from));
+    let mut loss = ctx.init::<nn::loss::Loss>("loss", n_voc);
 
     for step in 0..=40 {
         if step % 10 == 0 {
             val_loader.rand();
             let mut val_loss = 0.;
             for _ in 0..5 {
-                let [inputs, _targets] = val_loader.load();
-                let tokens = Tensor::new(types::U16, &[batch_size, seq_len]).map(|_| inputs.into());
-                let _y = ctx.forward("gpt2", &mut gpt2, vec![tokens.share()]);
+                let [inputs, targets] = val_loader.load();
 
-                // println!("{}", _y[0].read().as_deref());
-                // std::process::exit(0);
+                let shape = [batch_size, seq_len];
+                let tokens = Tensor::new(types::U16, &shape).map(|_| inputs.into());
+                let targets = Tensor::new(types::U16, &shape).map(|_| targets.into());
+
+                let logits = ctx.forward("gpt2", &mut gpt2, [tokens.share()]);
+                let losses = ctx.forward("loss", &mut loss, [logits[0].clone(), targets.share()]);
+
+                println!("{}", losses[0].read().as_deref());
+                std::process::exit(0);
 
                 // val_loss += gpt2.forward(inputs, Some(targets));
             }

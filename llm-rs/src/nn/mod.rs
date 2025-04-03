@@ -5,6 +5,7 @@ pub mod gpt2;
 pub mod gpt2_blk;
 pub mod layer_norm;
 pub mod linear;
+pub mod loss;
 
 use crate::{Tensor, blob::Blob, context::Context};
 use tensor::rw_rc::RwRc;
@@ -49,7 +50,7 @@ mod macros {
     }
 
     macro_rules! destruct {
-        ([$( $name:ident )+] = $iter:expr) => {
+        ([$( $name:ident ),+] = $iter:expr) => {
             let mut iter = $iter.into_iter();
             $(
                 let $name = iter.next().unwrap();
