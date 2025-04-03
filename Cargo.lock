@@ -44,9 +44,9 @@ dependencies = [
 
 [[package]]
 name = "bytemuck_derive"
-version = "1.9.2"
+version = "1.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2ff22c2722516255d1823ce3cc4bc0b154dbc9364be5c905d6baa6eccbbc8774"
+checksum = "7ecc273b49b3205b83d648f0690daa588925572cc5063745bfe547fe7ec8e1a1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -317,7 +317,7 @@ checksum = "8355be11b20d696c8f18f6cc018c4e372165b1fa8126cef092399c9951984ffa"
 
 [[package]]
 name = "llm-rs"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "digit-layout",
  "gemm",
@@ -325,8 +325,8 @@ dependencies = [
  "itertools",
  "mem-rearrange",
  "memmap2",
- "ndarray-layout",
  "rand",
+ "tensor",
 ]
 
 [[package]]
@@ -389,9 +389,9 @@ dependencies = [
 
 [[package]]
 name = "once_cell"
-version = "1.21.1"
+version = "1.21.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d75b0bedcc4fe52caa0e03d9f1151a323e4aa5e2d78ba3580400cd3c9e2bc4bc"
+checksum = "42f5e15c9953c5e4ccceeb2e7382a716482c34515315f7b03532b8b4e8393d2d"
 
 [[package]]
 name = "paste"
@@ -529,6 +529,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2b15c43186be67a4fd63bee50d0303afffcef381492ebe2c5d87f324e1b8815c"
 
 [[package]]
+name = "rw-rc"
+version = "0.1.0"
+
+[[package]]
 name = "same-file"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -586,6 +590,15 @@ dependencies = [
  "libc",
  "thiserror",
  "walkdir",
+]
+
+[[package]]
+name = "tensor"
+version = "0.1.0"
+dependencies = [
+ "digit-layout",
+ "ndarray-layout",
+ "rw-rc",
 ]
 
 [[package]]

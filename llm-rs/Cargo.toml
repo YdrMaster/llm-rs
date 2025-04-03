@@ -1,0 +1,16 @@
+[package]
+name = "llm-rs"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tensor.path = "../tensor"
+
+digit-layout = "0.3"
+mem-rearrange = "0.1"
+itertools = "0.14"
+gemm = "0.18"
+
+memmap2 = "0.9"
+globset = "0.4"
+rand = "0.9"

@@ -1,0 +1,82 @@
+﻿use crate::{Blob, Tensor, nn::NeuralNetwork};
+use std::collections::{HashMap, HashSet};
+use tensor::rw_rc::{RwRc, RwWeak};
+
+pub struct Context {
+    path: String,
+    weights: HashMap<WeakWeight, WeightInfo>,
+}
+
+type WeakWeight = RwWeak<Tensor<Blob>>;
+
+#[derive(Default)]
+struct WeightInfo {
+    gradient: Option<RwRc<Tensor<Blob>>>,
+    names: HashSet<String>,
+}
+
+impl Context {
+    pub fn new() -> Self {
+        Self {
+            path: "Ω".into(),
+            weights: Default::default(),
+        }
+    }
+
+    pub fn trap<T>(&mut self, sub: impl AsRef<str>, f: impl FnOnce(&mut Self) -> T) -> T {
+        let sub = sub.as_ref();
+
+        self.path.push('.');
+        self.path.push_str(sub);
+
+        let ans = f(self);
+
+        assert!(self.path.ends_with(sub));
+        self.path.truncate(self.path.len() - sub.len() - 1);
+
+        ans
+    }
+
+    pub fn write_gradient(
+        &mut self,
+        name: &str,
+        weight: &RwRc<Tensor<Blob>>,
+    ) -> RwRc<Tensor<Blob>> {
+        // 注册权重
+        let info = self.weights.entry(weight.weak()).or_default();
+        // 记录名字
+        info.names.insert(format!("{}:{name}", self.path));
+        // 生成或取出梯度
+        info.gradient
+            .get_or_insert_with(|| {
+                Tensor::contiguous_of(weight.read())
+                    .map(Blob::new_zeroed)
+                    .share()
+            })
+            .clone()
+    }
+}
+
+impl Context {
+    pub fn init<NN: NeuralNetwork>(&mut self, name: impl AsRef<str>, init: NN::Init) -> NN {
+        self.trap(name, |ctx| NN::init(init, ctx))
+    }
+
+    pub fn forward<NN: NeuralNetwork>(
+        &mut self,
+        name: impl AsRef<str>,
+        nn: &mut NN,
+        inputs: impl IntoIterator<Item = RwRc<Tensor<Blob>>>,
+    ) -> Vec<RwRc<Tensor<Blob>>> {
+        self.trap(name, |ctx| nn.forward(inputs, ctx))
+    }
+
+    pub fn backward<NN: NeuralNetwork>(
+        &mut self,
+        name: impl AsRef<str>,
+        nn: &mut NN,
+        inputs: impl IntoIterator<Item = RwRc<Tensor<Blob>>>,
+    ) -> Vec<RwRc<Tensor<Blob>>> {
+        self.trap(name, |ctx| nn.backward(inputs, ctx))
+    }
+}

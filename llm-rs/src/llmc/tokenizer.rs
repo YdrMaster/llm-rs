@@ -1,4 +1,4 @@
-use crate::BinHeader;
+use super::BinHeader;
 use memmap2::Mmap;
 use std::{fs::File, io::Write, path::Path};
 

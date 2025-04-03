@@ -1,4 +1,4 @@
-use crate::BinHeader;
+use super::BinHeader;
 use globset::Glob;
 use memmap2::Mmap;
 use rand::seq::SliceRandom;
