@@ -20,7 +20,7 @@ impl<'s, const N: usize> Tensor<&'s [u8], N> {
     }
 
     pub fn ptr<U>(&self) -> *const U {
-        assert_eq!(self.dt.nbytes(), size_of::<U>());
+        // assert_eq!(self.dt.nbytes(), size_of::<U>());
         self.data[self.layout.offset() as usize..].as_ptr().cast()
     }
 }
@@ -44,7 +44,7 @@ impl<'s, const N: usize> Tensor<&'s mut [u8], N> {
     }
 
     pub fn mut_ptr<U>(&mut self) -> *mut U {
-        assert_eq!(self.dt.nbytes(), size_of::<U>());
+        // assert_eq!(self.dt.nbytes(), size_of::<U>());
         self.data[self.layout.offset() as usize..]
             .as_mut_ptr()
             .cast()

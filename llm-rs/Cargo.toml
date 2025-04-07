@@ -11,6 +11,7 @@ digit-layout = "0.3"
 mem-rearrange = "0.1"
 itertools = "0.14"
 gemm = "0.18"
+rayon = "1.10"
 
 memmap2 = "0.9"
 globset = "0.4"

@@ -49,6 +49,14 @@ mod macros {
         };
     }
 
+    macro_rules! strides {
+        ($pat:pat = $tensor:expr) => {
+            let &$pat = &*$tensor.layout().strides() else {
+                panic!("Ndim mismatch ( = {})", $tensor.layout().strides().len())
+            };
+        };
+    }
+
     macro_rules! destruct {
         ([$( $name:ident ),+] = $iter:expr) => {
             let mut iter = $iter.into_iter();
@@ -59,5 +67,5 @@ mod macros {
         };
     }
 
-    pub(super) use {destruct, dims};
+    pub(super) use {destruct, dims, strides};
 }

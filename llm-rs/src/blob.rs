@@ -38,7 +38,7 @@ impl Drop for Blob {
                 self.ptr.as_ptr(),
                 Layout::from_size_align(self.len, align_of::<usize>()).unwrap(),
             )
-        };
+        }
     }
 }
 

@@ -326,6 +326,7 @@ dependencies = [
  "mem-rearrange",
  "memmap2",
  "rand",
+ "rayon",
  "tensor",
 ]
 
