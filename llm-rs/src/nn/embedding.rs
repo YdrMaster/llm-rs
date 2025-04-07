@@ -25,7 +25,7 @@ impl NeuralNetwork for Embedding {
     fn forward(
         &mut self,
         inputs: impl IntoIterator<Item = RwRc<Tensor<Blob>>>,
-        _ctx: &mut Context,
+        ctx: &mut Context,
     ) -> Vec<RwRc<Tensor<Blob>>> {
         destruct!([tokens] = inputs);
         self.tokens.replace(tokens);
@@ -54,7 +54,7 @@ impl NeuralNetwork for Embedding {
                 }
                 blob
             });
-            forward::embedding(y, i1, i2.as_deref(), te.as_deref(), pe.as_deref())
+            ctx.bench(|| forward::embedding(y, i1, i2.as_deref(), te.as_deref(), pe.as_deref()))
         }
 
         vec![y.share()]
@@ -83,13 +83,17 @@ impl NeuralNetwork for Embedding {
                 }
                 blob
             });
-            backward::embedding(
-                ctx.write_gradient("wte", te).write().as_deref_mut(),
-                ctx.write_gradient("wpe", pe).write().as_deref_mut(),
-                dy.read().as_deref().merge(0, 2),
-                i1.read().as_deref().merge(0, 2),
-                i2.as_deref(),
-            )
+            let dtable1 = ctx.write_gradient("wte", te);
+            let dtable2 = ctx.write_gradient("wpe", pe);
+            ctx.bench(|| {
+                backward::embedding(
+                    dtable1.write().as_deref_mut(),
+                    dtable2.write().as_deref_mut(),
+                    dy.read().as_deref().merge(0, 2),
+                    i1.read().as_deref().merge(0, 2),
+                    i2.as_deref(),
+                )
+            })
         }
 
         te.release();

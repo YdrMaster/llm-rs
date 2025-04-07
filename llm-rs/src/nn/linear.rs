@@ -27,7 +27,7 @@ impl NeuralNetwork for Linear {
     fn forward(
         &mut self,
         inputs: impl IntoIterator<Item = RwRc<Tensor<Blob>>>,
-        _ctx: &mut Context,
+        ctx: &mut Context,
     ) -> Vec<RwRc<Tensor<Blob>>> {
         destruct!([x] = inputs);
         self.x.replace(x);
@@ -39,12 +39,14 @@ impl NeuralNetwork for Linear {
         dims!([d, _] = w);
         let mut y = Tensor::new(x.dt(), &[batch_size, seq_len, d]).map(Blob::new);
 
-        forward(
-            y.as_deref_mut(),
-            x.as_deref(),
-            w.as_deref(),
-            b.as_ref().map(|t| t.read().as_deref()),
-        );
+        ctx.bench(|| {
+            forward(
+                y.as_deref_mut(),
+                x.as_deref(),
+                w.as_deref(),
+                b.as_ref().map(|t| t.read().as_deref()),
+            )
+        });
 
         vec![y.share()]
     }
@@ -59,19 +61,19 @@ impl NeuralNetwork for Linear {
 
         let x = x.take().unwrap();
         let x = x.read();
+        let dw = ctx.write_gradient("w", w);
         let mut dx = Tensor::contiguous_of(x).map(Blob::new_zeroed);
-
-        backward(
-            dx.as_deref_mut(),
-            ctx.write_gradient("w", w).write().as_deref_mut(),
-            b.as_ref()
-                .map(|b| ctx.write_gradient("b", b))
-                .as_ref()
-                .map(|t| t.write().as_deref_mut()),
-            dy.read().as_deref(),
-            x.as_deref(),
-            w.read().as_deref(),
-        );
+        let db = b.as_ref().map(|b| ctx.write_gradient("b", b));
+        ctx.bench(|| {
+            backward(
+                dx.as_deref_mut(),
+                dw.write().as_deref_mut(),
+                db.as_ref().map(|t| t.write().as_deref_mut()),
+                dy.read().as_deref(),
+                x.as_deref(),
+                w.read().as_deref(),
+            )
+        });
 
         w.release();
         if let Some(b) = &b {

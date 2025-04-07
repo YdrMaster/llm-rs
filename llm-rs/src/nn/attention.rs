@@ -25,7 +25,7 @@ impl NeuralNetwork for Attention {
     fn forward(
         &mut self,
         inputs: impl IntoIterator<Item = RwRc<Tensor<Blob>>>,
-        _ctx: &mut Context,
+        ctx: &mut Context,
     ) -> Vec<RwRc<Tensor<Blob>>> {
         destruct!([x] = inputs);
         self.x.replace(x);
@@ -41,12 +41,14 @@ impl NeuralNetwork for Attention {
         let mut preatt = tensor(&[batch_size, *nh, n_seq, n_seq]);
         let mut att = tensor(&[batch_size, *nh, n_seq, n_seq]);
 
-        forward(
-            y.as_deref_mut(),
-            preatt.as_deref_mut(),
-            att.as_deref_mut(),
-            x.as_deref(),
-        );
+        ctx.bench(|| {
+            forward(
+                y.as_deref_mut(),
+                preatt.as_deref_mut(),
+                att.as_deref_mut(),
+                x.as_deref(),
+            )
+        });
 
         self.att.replace(att);
 
@@ -56,7 +58,7 @@ impl NeuralNetwork for Attention {
     fn backward(
         &mut self,
         inputs: impl IntoIterator<Item = RwRc<Tensor<Blob>>>,
-        _ctx: &mut Context,
+        ctx: &mut Context,
     ) -> Vec<RwRc<Tensor<Blob>>> {
         destruct!([dy] = inputs);
         let Self { x, att, .. } = self;
@@ -69,14 +71,16 @@ impl NeuralNetwork for Attention {
         let mut dpreatt = Tensor::contiguous_of(&att).map(Blob::new_zeroed);
         let mut datt = Tensor::contiguous_of(&att).map(Blob::new_zeroed);
 
-        backward(
-            dx.as_deref_mut(),
-            dpreatt.as_deref_mut(),
-            datt.as_deref_mut(),
-            dy.read().as_deref(),
-            x.as_deref(),
-            att.as_deref(),
-        );
+        ctx.bench(|| {
+            backward(
+                dx.as_deref_mut(),
+                dpreatt.as_deref_mut(),
+                datt.as_deref_mut(),
+                dy.read().as_deref(),
+                x.as_deref(),
+                att.as_deref(),
+            )
+        });
 
         vec![dx.share()]
     }

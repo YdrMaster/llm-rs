@@ -1,10 +1,14 @@
 ﻿use crate::{Blob, Tensor, nn::NeuralNetwork, optimizer::Optimizer};
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    time::Instant,
+};
 use tensor::rw_rc::{RwRc, RwWeak};
 
 pub struct Context {
     path: String,
     weights: HashMap<WeakWeight, WeightInfo>,
+    bench: bool,
 }
 
 type WeakWeight = RwWeak<Tensor<Blob>>;
@@ -16,10 +20,11 @@ struct WeightInfo {
 }
 
 impl Context {
-    pub fn new() -> Self {
+    pub fn new(bench: bool) -> Self {
         Self {
             path: "Ω".into(),
             weights: Default::default(),
+            bench,
         }
     }
 
@@ -92,5 +97,13 @@ impl Context {
         inputs: impl IntoIterator<Item = RwRc<Tensor<Blob>>>,
     ) -> Vec<RwRc<Tensor<Blob>>> {
         self.trap(name, |ctx| nn.backward(inputs, ctx))
+    }
+
+    pub fn bench(&self, f: impl FnOnce()) {
+        let time = Instant::now();
+        f();
+        if self.bench {
+            println!("{}: {:?}", self.path, time.elapsed())
+        }
     }
 }

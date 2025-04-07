@@ -43,7 +43,7 @@ fn main() {
     let gpt2 = llmc::Gpt2::new(&mmap);
     let n_voc = gpt2.config.n_voc;
 
-    let mut ctx = Context::new();
+    let mut ctx = Context::new(true);
     let mut gpt2 = ctx.init::<nn::gpt2::Gpt2>("gpt2", gpt2.map(Blob::from));
     let mut loss = ctx.init::<nn::loss::Loss>("loss", n_voc);
     let mut adamw = AdamW::new(1e-4, 0.9, 0.999, 1e-8, 0.);

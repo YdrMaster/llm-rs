@@ -29,7 +29,7 @@ impl NeuralNetwork for LayerNorm {
     fn forward(
         &mut self,
         inputs: impl IntoIterator<Item = RwRc<Tensor<Blob>>>,
-        _ctx: &mut Context,
+        ctx: &mut Context,
     ) -> Vec<RwRc<Tensor<Blob>>> {
         destruct!([x] = inputs);
         self.x.replace(x);
@@ -44,14 +44,16 @@ impl NeuralNetwork for LayerNorm {
         let mut mean = tensor(&[batch_size, n_seq]);
         let mut rstd = tensor(&[batch_size, n_seq]);
 
-        forward(
-            y.as_deref_mut(),
-            mean.as_deref_mut(),
-            rstd.as_deref_mut(),
-            x.as_deref(),
-            w.read().as_deref(),
-            b.read().as_deref(),
-        );
+        ctx.bench(|| {
+            forward(
+                y.as_deref_mut(),
+                mean.as_deref_mut(),
+                rstd.as_deref_mut(),
+                x.as_deref(),
+                w.read().as_deref(),
+                b.read().as_deref(),
+            )
+        });
 
         self.mean.replace(mean);
         self.rstd.replace(rstd);
@@ -77,16 +79,20 @@ impl NeuralNetwork for LayerNorm {
         let x = x.read();
         let mut dx = Tensor::contiguous_of(x).map(Blob::new_zeroed);
 
-        backward(
-            dx.as_deref_mut(),
-            ctx.write_gradient("w", w).write().as_deref_mut(),
-            ctx.write_gradient("b", b).write().as_deref_mut(),
-            dy.read().as_deref(),
-            x.as_deref(),
-            w.read().as_deref(),
-            mean.take().unwrap().as_deref(),
-            rstd.take().unwrap().as_deref(),
-        );
+        let dw = ctx.write_gradient("w", w);
+        let db = ctx.write_gradient("b", b);
+        ctx.bench(|| {
+            backward(
+                dx.as_deref_mut(),
+                dw.write().as_deref_mut(),
+                db.write().as_deref_mut(),
+                dy.read().as_deref(),
+                x.as_deref(),
+                w.read().as_deref(),
+                mean.take().unwrap().as_deref(),
+                rstd.take().unwrap().as_deref(),
+            )
+        });
 
         w.release();
         b.release();
