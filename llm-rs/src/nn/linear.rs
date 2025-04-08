@@ -41,8 +41,8 @@ impl NeuralNetwork for Linear {
 
         ctx.bench(|| {
             forward(
-                y.as_deref_mut(),
-                x.as_deref(),
+                y.as_deref_mut().merge(0, 2),
+                x.as_deref().merge(0, 2),
                 w.as_deref(),
                 b.as_ref().map(|t| t.read().as_deref()),
             )
@@ -66,11 +66,11 @@ impl NeuralNetwork for Linear {
         let db = b.as_ref().map(|b| ctx.write_gradient("b", b));
         ctx.bench(|| {
             backward(
-                dx.as_deref_mut(),
+                dx.as_deref_mut().merge(0, 2),
                 dw.write().as_deref_mut(),
                 db.as_ref().map(|t| t.write().as_deref_mut()),
-                dy.read().as_deref(),
-                x.as_deref(),
+                dy.read().as_deref().merge(0, 2),
+                x.as_deref().merge(0, 2),
                 w.read().as_deref(),
             )
         });
@@ -85,16 +85,13 @@ impl NeuralNetwork for Linear {
 }
 
 fn forward(
-    y: Tensor<&mut [u8]>,
+    mut y: Tensor<&mut [u8]>,
     x: Tensor<&[u8]>,
     weight: Tensor<&[u8]>,
     bias: Option<Tensor<&[u8]>>,
 ) {
     let dt = unique(&[y.dt(), x.dt(), weight.dt()]).unwrap();
     assert_eq!(dt, types::F32);
-
-    let mut y = y.merge(0, 2);
-    let x = x.merge(0, 2);
 
     dims!([m, n] = y);
     dims!([m_, k] = x);
@@ -117,7 +114,7 @@ fn forward(
             )
             .unwrap()
             .launch(y.get_mut().as_mut_ptr(), bias.get().as_ptr())
-        };
+        }
     }
 
     unsafe {
@@ -146,7 +143,7 @@ fn forward(
 }
 
 fn backward(
-    dx: Tensor<&mut [u8]>,
+    mut dx: Tensor<&mut [u8]>,
     mut dw: Tensor<&mut [u8]>,
     db: Option<Tensor<&mut [u8]>>,
     dy: Tensor<&[u8]>,
@@ -155,9 +152,6 @@ fn backward(
 ) {
     let dt = unique(&[dx.dt(), dw.dt(), dy.dt(), x.dt(), w.dt()]).unwrap();
     assert_eq!(dt, types::F32);
-
-    let mut dx = dx.merge(0, 2);
-    let dy = dy.merge(0, 2);
 
     dims!([m, n] = dx);
     dims!([m_, k] = dy);
@@ -189,8 +183,6 @@ fn backward(
             Rayon(0),
         )
     };
-
-    let x = x.merge(0, 2);
 
     dims!([m, n] = dw);
     dims!([k, m_] = dy);
