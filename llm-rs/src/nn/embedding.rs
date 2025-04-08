@@ -103,6 +103,16 @@ impl NeuralNetwork for Embedding {
     }
 }
 
+trait Index: Copy + Sync {
+    fn as_usize(self) -> usize;
+}
+
+impl<T: Copy + Sync + Into<usize>> Index for T {
+    fn as_usize(self) -> usize {
+        self.into()
+    }
+}
+
 mod forward {
     use super::*;
 
@@ -158,16 +168,6 @@ mod forward {
         i2: *const u8,
         table1: *const u8,
         table2: *const u8,
-    }
-
-    trait Index: Copy + Sync {
-        fn as_usize(self) -> usize;
-    }
-
-    impl<T: Copy + Sync + Into<usize>> Index for T {
-        fn as_usize(self) -> usize {
-            self.into()
-        }
     }
 
     impl Scheme {
@@ -253,16 +253,6 @@ mod backward {
         dy: *const u8,
         i1: *const u8,
         i2: *const u8,
-    }
-
-    trait Index: Copy + Sync {
-        fn as_usize(self) -> usize;
-    }
-
-    impl<T: Copy + Sync + Into<usize>> Index for T {
-        fn as_usize(self) -> usize {
-            self.into()
-        }
     }
 
     impl Scheme {

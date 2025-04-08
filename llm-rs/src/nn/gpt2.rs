@@ -34,9 +34,8 @@ impl NeuralNetwork for Gpt2 {
         } = init;
 
         let wte = wte.share();
-        let wpe = wpe.share();
 
-        let embedding = ctx.init(EMBEDDING, [wte.clone(), wpe]);
+        let embedding = ctx.init(EMBEDDING, [wte.clone(), wpe.share()]);
         let blks = blks
             .into_iter()
             .enumerate()
