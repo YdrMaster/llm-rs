@@ -1,5 +1,5 @@
 use super::Tensor;
-use crate::op::macros::clone_tensor;
+use crate::macros::clone_tensor;
 
 pub fn add(y: &Tensor, x: &Tensor) {
     clone_tensor!(y x);

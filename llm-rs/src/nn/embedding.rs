@@ -1,6 +1,7 @@
-use super::{NeuralNetwork, Tensor, macros::*};
+use super::{NeuralNetwork, Tensor};
 use crate::{
     Context,
+    macros::*,
     op::embedding::{BatchIter, backward, build_pos, forward},
 };
 use digit_layout::types;

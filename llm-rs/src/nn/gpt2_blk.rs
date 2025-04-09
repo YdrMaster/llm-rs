@@ -1,8 +1,7 @@
 use super::{
     NeuralNetwork, Tensor, attention::Attention, gelu::Gelu, layer_norm::LayerNorm, linear::Linear,
-    macros::destruct,
 };
-use crate::{Blob, Context, llmc, op::add::add};
+use crate::{Blob, Context, llmc, macros::*, op::add::add};
 use rw_rc::RwRc;
 use std::rc::Rc;
 

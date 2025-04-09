@@ -54,8 +54,10 @@ pub fn build_pos(buf: &mut [u8], nseqs: impl IntoIterator<Item = usize>) {
 
 pub mod forward {
     use super::Index;
-    use crate::op::Tensor;
-    use crate::op::{macros::*, unique};
+    use crate::{
+        macros::*,
+        op::{Tensor, unique},
+    };
     use digit_layout::types;
     use std::{iter::zip, ops::Add};
 
@@ -143,8 +145,10 @@ pub mod forward {
 
 pub mod backward {
     use super::Index;
-    use crate::op::Tensor;
-    use crate::op::{macros::*, unique};
+    use crate::{
+        macros::*,
+        op::{Tensor, unique},
+    };
     use digit_layout::types;
     use std::{iter::zip, ops::AddAssign};
 

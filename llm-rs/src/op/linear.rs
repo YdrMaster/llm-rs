@@ -1,4 +1,5 @@
-use super::{Tensor, macros::*, unique};
+use super::{Tensor, unique};
+use crate::macros::*;
 use digit_layout::types;
 use gemm::{Parallelism::Rayon, gemm};
 use mem_rearrange::Rearranging;

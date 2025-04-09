@@ -1,6 +1,7 @@
-use super::{NeuralNetwork, Tensor, macros::*};
+use super::{NeuralNetwork, Tensor};
 use crate::{
     Context,
+    macros::*,
     op::gelu::{backward, forward},
 };
 use std::rc::Rc;

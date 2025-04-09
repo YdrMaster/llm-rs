@@ -1,6 +1,7 @@
-use super::{NeuralNetwork, Tensor, macros::*};
+use super::{NeuralNetwork, Tensor};
 use crate::{
     Context,
+    macros::*,
     op::loss::{backward, crossentropy, softmax},
 };
 use std::rc::Rc;

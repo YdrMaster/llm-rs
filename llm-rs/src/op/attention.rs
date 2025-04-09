@@ -1,8 +1,8 @@
-﻿use std::{iter::zip, slice::from_raw_parts_mut};
-
-use super::{Tensor, macros::*, unique};
+﻿use super::{Tensor, unique};
+use crate::macros::*;
 use digit_layout::types;
 use itertools::izip;
+use std::{iter::zip, slice::from_raw_parts_mut};
 
 pub fn forward(y: &Tensor, preatt: &Tensor, att: &Tensor, x: &Tensor) {
     clone_tensor!(y preatt att x);

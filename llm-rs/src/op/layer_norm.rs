@@ -1,7 +1,6 @@
-use crate::op::{
-    Tensor,
-    macros::{clone_tensor, dims, strides},
-    unique,
+use crate::{
+    macros::*,
+    op::{Tensor, unique},
 };
 use digit_layout::types;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};

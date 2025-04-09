@@ -1,4 +1,5 @@
-﻿use super::{Tensor, macros::*, unique};
+﻿use super::{Tensor, unique};
+use crate::macros::*;
 use digit_layout::types;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use std::{
