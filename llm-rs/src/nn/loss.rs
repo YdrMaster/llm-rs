@@ -1,21 +1,22 @@
-use super::{NeuralNetwork, Tensor};
+use super::{NeuralNetwork, Tensor_};
 use crate::{
-    Context,
+    TestContext,
     macros::*,
     op::loss::{backward, crossentropy, softmax},
+    vm::TestVM,
 };
 use std::rc::Rc;
 
 pub struct Loss {
     n_voc: usize,
-    targets: Option<Rc<Tensor>>,
-    probs: Option<Tensor>,
+    targets: Option<Rc<Tensor_>>,
+    probs: Option<Tensor_>,
 }
 
-impl NeuralNetwork for Loss {
+impl NeuralNetwork<TestVM> for Loss {
     type Init = usize;
 
-    fn init(init: Self::Init, _ctx: &mut Context) -> Self {
+    fn init(init: Self::Init, _ctx: &mut TestContext) -> Self {
         Self {
             n_voc: init,
             targets: None,
@@ -25,9 +26,9 @@ impl NeuralNetwork for Loss {
 
     fn forward(
         &mut self,
-        inputs: impl IntoIterator<Item = Rc<Tensor>>,
-        ctx: &mut Context,
-    ) -> Vec<Rc<Tensor>> {
+        inputs: impl IntoIterator<Item = Rc<Tensor_>>,
+        ctx: &mut TestContext,
+    ) -> Vec<Rc<Tensor_>> {
         destruct!([logits, targets] = inputs);
         self.targets.replace(targets);
         let Self {
@@ -50,9 +51,9 @@ impl NeuralNetwork for Loss {
 
     fn backward(
         &mut self,
-        inputs: impl IntoIterator<Item = Rc<Tensor>>,
-        ctx: &mut Context,
-    ) -> Vec<Rc<Tensor>> {
+        inputs: impl IntoIterator<Item = Rc<Tensor_>>,
+        ctx: &mut TestContext,
+    ) -> Vec<Rc<Tensor_>> {
         destruct!([dlosses] = inputs);
         let Self { targets, probs, .. } = self;
 

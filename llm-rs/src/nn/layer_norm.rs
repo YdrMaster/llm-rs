@@ -1,24 +1,25 @@
-use super::{NeuralNetwork, Tensor};
+use super::{NeuralNetwork, Tensor_};
 use crate::{
-    Context,
+    TestContext,
     macros::*,
     op::layer_norm::{backward, forward},
+    vm::TestVM,
 };
 
 use std::rc::Rc;
 
 pub struct LayerNorm {
-    w: Rc<Tensor>,
-    b: Rc<Tensor>,
-    x: Option<Rc<Tensor>>,
-    mean: Option<Tensor>,
-    rstd: Option<Tensor>,
+    w: Rc<Tensor_>,
+    b: Rc<Tensor_>,
+    x: Option<Rc<Tensor_>>,
+    mean: Option<Tensor_>,
+    rstd: Option<Tensor_>,
 }
 
-impl NeuralNetwork for LayerNorm {
-    type Init = [Rc<Tensor>; 2];
+impl NeuralNetwork<TestVM> for LayerNorm {
+    type Init = [Rc<Tensor_>; 2];
 
-    fn init(init: Self::Init, _ctx: &mut Context) -> Self {
+    fn init(init: Self::Init, _ctx: &mut TestContext) -> Self {
         let [scalar, bias] = init;
         Self {
             w: scalar,
@@ -31,9 +32,9 @@ impl NeuralNetwork for LayerNorm {
 
     fn forward(
         &mut self,
-        inputs: impl IntoIterator<Item = Rc<Tensor>>,
-        ctx: &mut Context,
-    ) -> Vec<Rc<Tensor>> {
+        inputs: impl IntoIterator<Item = Rc<Tensor_>>,
+        ctx: &mut TestContext,
+    ) -> Vec<Rc<Tensor_>> {
         destruct!([x] = inputs);
         self.x.replace(x);
         let Self { w, b, x, .. } = self;
@@ -64,9 +65,9 @@ impl NeuralNetwork for LayerNorm {
 
     fn backward(
         &mut self,
-        inputs: impl IntoIterator<Item = Rc<Tensor>>,
-        ctx: &mut Context,
-    ) -> Vec<Rc<Tensor>> {
+        inputs: impl IntoIterator<Item = Rc<Tensor_>>,
+        ctx: &mut TestContext,
+    ) -> Vec<Rc<Tensor_>> {
         destruct!([dy] = inputs);
         let Self {
             w,

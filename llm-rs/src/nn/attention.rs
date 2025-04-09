@@ -1,6 +1,6 @@
-﻿use super::{NeuralNetwork, Tensor};
+﻿use super::{NeuralNetwork, Tensor_, TestVM};
 use crate::{
-    Context,
+    TestContext,
     macros::*,
     op::attention::{backward, forward},
 };
@@ -8,14 +8,14 @@ use std::rc::Rc;
 
 pub struct Attention {
     nh: usize,
-    x: Option<Rc<Tensor>>,
-    att: Option<Tensor>,
+    x: Option<Rc<Tensor_>>,
+    att: Option<Tensor_>,
 }
 
-impl NeuralNetwork for Attention {
+impl NeuralNetwork<TestVM> for Attention {
     type Init = usize;
 
-    fn init(init: Self::Init, _ctx: &mut Context) -> Self {
+    fn init(init: Self::Init, _ctx: &mut TestContext) -> Self {
         Self {
             nh: init,
             x: None,
@@ -25,9 +25,9 @@ impl NeuralNetwork for Attention {
 
     fn forward(
         &mut self,
-        inputs: impl IntoIterator<Item = Rc<Tensor>>,
-        ctx: &mut Context,
-    ) -> Vec<Rc<Tensor>> {
+        inputs: impl IntoIterator<Item = Rc<Tensor_>>,
+        ctx: &mut TestContext,
+    ) -> Vec<Rc<Tensor_>> {
         destruct!([x] = inputs);
         self.x.replace(x);
         let Self { nh, x, .. } = self;
@@ -49,9 +49,9 @@ impl NeuralNetwork for Attention {
 
     fn backward(
         &mut self,
-        inputs: impl IntoIterator<Item = Rc<Tensor>>,
-        ctx: &mut Context,
-    ) -> Vec<Rc<Tensor>> {
+        inputs: impl IntoIterator<Item = Rc<Tensor_>>,
+        ctx: &mut TestContext,
+    ) -> Vec<Rc<Tensor_>> {
         destruct!([dy] = inputs);
         let Self { x, att, .. } = self;
 

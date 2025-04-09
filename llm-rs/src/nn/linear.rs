@@ -1,21 +1,22 @@
-use super::{NeuralNetwork, Tensor};
+use super::{NeuralNetwork, Tensor_};
 use crate::{
-    Context,
+    TestContext,
     macros::*,
     op::linear::{backward, forward},
+    vm::TestVM,
 };
 use std::rc::Rc;
 
 pub struct Linear {
-    w: Rc<Tensor>,
-    b: Option<Rc<Tensor>>,
-    x: Option<Rc<Tensor>>,
+    w: Rc<Tensor_>,
+    b: Option<Rc<Tensor_>>,
+    x: Option<Rc<Tensor_>>,
 }
 
-impl NeuralNetwork for Linear {
-    type Init = (Rc<Tensor>, Option<Rc<Tensor>>);
+impl NeuralNetwork<TestVM> for Linear {
+    type Init = (Rc<Tensor_>, Option<Rc<Tensor_>>);
 
-    fn init(init: Self::Init, _ctx: &mut Context) -> Self {
+    fn init(init: Self::Init, _ctx: &mut TestContext) -> Self {
         let (weight, bias) = init;
         Self {
             w: weight,
@@ -26,9 +27,9 @@ impl NeuralNetwork for Linear {
 
     fn forward(
         &mut self,
-        inputs: impl IntoIterator<Item = Rc<Tensor>>,
-        ctx: &mut Context,
-    ) -> Vec<Rc<Tensor>> {
+        inputs: impl IntoIterator<Item = Rc<Tensor_>>,
+        ctx: &mut TestContext,
+    ) -> Vec<Rc<Tensor_>> {
         destruct!([x] = inputs);
         self.x.replace(x);
         let Self { w, b, x } = self;
@@ -52,9 +53,9 @@ impl NeuralNetwork for Linear {
 
     fn backward(
         &mut self,
-        inputs: impl IntoIterator<Item = Rc<Tensor>>,
-        ctx: &mut Context,
-    ) -> Vec<Rc<Tensor>> {
+        inputs: impl IntoIterator<Item = Rc<Tensor_>>,
+        ctx: &mut TestContext,
+    ) -> Vec<Rc<Tensor_>> {
         destruct!([dy] = inputs);
         let Self { w, b, x } = self;
 

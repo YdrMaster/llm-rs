@@ -1,27 +1,27 @@
-use super::{NeuralNetwork, Tensor};
+use super::{NeuralNetwork, Tensor_, TestVM};
 use crate::{
-    Context,
+    TestContext,
     macros::*,
     op::gelu::{backward, forward},
 };
 use std::rc::Rc;
 
 pub struct Gelu {
-    x: Option<Rc<Tensor>>,
+    x: Option<Rc<Tensor_>>,
 }
 
-impl NeuralNetwork for Gelu {
+impl NeuralNetwork<TestVM> for Gelu {
     type Init = ();
 
-    fn init(_init: Self::Init, _ctx: &mut Context) -> Self {
+    fn init(_init: Self::Init, _ctx: &mut TestContext) -> Self {
         Self { x: None }
     }
 
     fn forward(
         &mut self,
-        inputs: impl IntoIterator<Item = Rc<Tensor>>,
-        ctx: &mut Context,
-    ) -> Vec<Rc<Tensor>> {
+        inputs: impl IntoIterator<Item = Rc<Tensor_>>,
+        ctx: &mut TestContext,
+    ) -> Vec<Rc<Tensor_>> {
         destruct!([x] = inputs);
         self.x.replace(x);
         let Self { x } = self;
@@ -36,9 +36,9 @@ impl NeuralNetwork for Gelu {
 
     fn backward(
         &mut self,
-        inputs: impl IntoIterator<Item = Rc<Tensor>>,
-        ctx: &mut Context,
-    ) -> Vec<Rc<Tensor>> {
+        inputs: impl IntoIterator<Item = Rc<Tensor_>>,
+        ctx: &mut TestContext,
+    ) -> Vec<Rc<Tensor_>> {
         destruct!([dy] = inputs);
         let Self { x } = self;
 

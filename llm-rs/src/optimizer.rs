@@ -1,15 +1,15 @@
-﻿use crate::{HashWeak, Tensor, blob::Blob};
+﻿use crate::{HashWeak, Tensor, blob::Blob, nn::Tensor_};
 use digit_layout::types;
 use itertools::izip;
 use rw_rc::RwRc;
 use std::{collections::HashMap, rc::Rc};
 
-pub trait Optimizer {
-    fn update(&mut self, weight: Rc<Tensor<RwRc<Blob>>>, gradient: Rc<Tensor<RwRc<Blob>>>);
+pub trait Optimizer<T> {
+    fn update(&mut self, weight: Rc<T>, gradient: Rc<T>);
 }
 
-pub struct AdamW {
-    weights: HashMap<HashWeak<Tensor<RwRc<Blob>>>, State>,
+pub struct AdamW<T> {
+    weights: HashMap<HashWeak<T>, State>,
     learning_rate: f32,
     beta1: f32,
     beta2: f32,
@@ -23,7 +23,31 @@ struct State {
     v: Blob,
 }
 
-impl Optimizer for AdamW {
+impl<T> AdamW<T> {
+    pub fn new(
+        learning_rate: f32,
+        beta1: f32,
+        beta2: f32,
+        epsilon: f32,
+        weight_decay: f32,
+    ) -> Self {
+        Self {
+            weights: Default::default(),
+            learning_rate,
+            beta1,
+            beta2,
+            epsilon,
+            weight_decay,
+            t: 1,
+        }
+    }
+
+    pub fn next(&mut self) {
+        self.t += 1
+    }
+}
+
+impl Optimizer<Tensor_> for AdamW<Tensor_> {
     fn update(&mut self, weight: Rc<Tensor<RwRc<Blob>>>, gradient: Rc<Tensor<RwRc<Blob>>>) {
         let &mut Self {
             ref mut weights,
@@ -70,29 +94,5 @@ impl Optimizer for AdamW {
             *v = beta2 * *v + (1. - beta2) * g * g;
             *w -= learning_rate * (*m * hat1 / ((*v * hat2).sqrt() + epsilon) + weight_decay * *w)
         }
-    }
-}
-
-impl AdamW {
-    pub fn new(
-        learning_rate: f32,
-        beta1: f32,
-        beta2: f32,
-        epsilon: f32,
-        weight_decay: f32,
-    ) -> Self {
-        Self {
-            weights: Default::default(),
-            learning_rate,
-            beta1,
-            beta2,
-            epsilon,
-            weight_decay,
-            t: 1,
-        }
-    }
-
-    pub fn next(&mut self) {
-        self.t += 1
     }
 }

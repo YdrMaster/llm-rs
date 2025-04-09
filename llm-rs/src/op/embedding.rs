@@ -1,4 +1,7 @@
-﻿trait Index: Copy + Sync {
+﻿use crate::nn::Tensor_;
+use std::iter::zip;
+
+trait Index: Copy + Sync {
     fn as_usize(self) -> usize;
 }
 
@@ -42,13 +45,12 @@ impl Iterator for BatchIter {
     }
 }
 
-pub fn build_pos(buf: &mut [u8], nseqs: impl IntoIterator<Item = usize>) {
-    let ([], mut slice, []) = (unsafe { buf.align_to_mut::<u16>() }) else {
-        unreachable!()
-    };
-    for i in nseqs {
-        slice[0] = i as _;
-        slice = &mut slice[1..]
+pub fn build_pos(table: &Tensor_, nseqs: impl IntoIterator<Item = usize>) {
+    let table = table.cloned().merge(0, table.layout().ndim());
+    let table = table.as_ref().map(|b| &mut **b.write()).vector_mut::<u16>();
+
+    for (buf, i) in zip(table, nseqs) {
+        *buf = i as _
     }
 }
 

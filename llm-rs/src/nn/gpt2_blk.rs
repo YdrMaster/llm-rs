@@ -1,7 +1,8 @@
 use super::{
-    NeuralNetwork, Tensor, attention::Attention, gelu::Gelu, layer_norm::LayerNorm, linear::Linear,
+    NeuralNetwork, Tensor_, TestVM, attention::Attention, gelu::Gelu, layer_norm::LayerNorm,
+    linear::Linear,
 };
-use crate::{Blob, Context, llmc, macros::*, op::add::add};
+use crate::{Blob, TestContext, llmc, macros::*, op::add::add};
 use rw_rc::RwRc;
 use std::rc::Rc;
 
@@ -25,10 +26,10 @@ pub struct Gpt2Blk {
     ffn_down: Linear,
 }
 
-impl NeuralNetwork for Gpt2Blk {
+impl NeuralNetwork<TestVM> for Gpt2Blk {
     type Init = (llmc::Gpt2Blk<RwRc<Blob>>, usize);
 
-    fn init(init: Self::Init, ctx: &mut Context) -> Self {
+    fn init(init: Self::Init, ctx: &mut TestContext) -> Self {
         let llmc::Gpt2Blk {
             attn_norm,
             attn_qkv,
@@ -38,7 +39,7 @@ impl NeuralNetwork for Gpt2Blk {
             ffn_down,
         } = init.0;
 
-        fn share(arr: [Tensor; 2]) -> [Rc<Tensor>; 2] {
+        fn share(arr: [Tensor_; 2]) -> [Rc<Tensor_>; 2] {
             arr.map(|t| t.share())
         }
 
@@ -76,9 +77,9 @@ impl NeuralNetwork for Gpt2Blk {
 
     fn forward(
         &mut self,
-        inputs: impl IntoIterator<Item = Rc<Tensor>>,
-        ctx: &mut Context,
-    ) -> Vec<Rc<Tensor>> {
+        inputs: impl IntoIterator<Item = Rc<Tensor_>>,
+        ctx: &mut TestContext,
+    ) -> Vec<Rc<Tensor_>> {
         let Self {
             attn_norm,
             attn_qkv,
@@ -116,9 +117,9 @@ impl NeuralNetwork for Gpt2Blk {
 
     fn backward(
         &mut self,
-        inputs: impl IntoIterator<Item = Rc<Tensor>>,
-        ctx: &mut Context,
-    ) -> Vec<Rc<Tensor>> {
+        inputs: impl IntoIterator<Item = Rc<Tensor_>>,
+        ctx: &mut TestContext,
+    ) -> Vec<Rc<Tensor_>> {
         let Self {
             attn_norm,
             attn_qkv,

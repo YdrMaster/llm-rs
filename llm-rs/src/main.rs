@@ -4,12 +4,13 @@ mod llmc;
 mod nn;
 mod op;
 mod optimizer;
-
-use std::{hash::Hash, rc::Weak};
+mod vm;
 
 use blob::Blob;
-use context::Context;
+use context::TestContext;
 use rw_rc::RwRc;
+use std::{hash::Hash, rc::Weak};
+use vm::TestVM;
 
 type Tensor<T> = tensor::Tensor<T, 4>;
 
@@ -47,7 +48,7 @@ fn main() {
     let gpt2 = llmc::Gpt2::new(&mmap);
     let n_voc = gpt2.config.n_voc;
 
-    let mut ctx = Context::new(false);
+    let mut ctx = TestContext::new(TestVM, false);
     let mut gpt2 = ctx.init::<nn::gpt2::Gpt2>("gpt2", gpt2.map(Blob::from).map(RwRc::new));
     let mut loss = ctx.init::<nn::loss::Loss>("loss", n_voc);
     let mut adamw = AdamW::new(1e-4, 0.9, 0.999, 1e-8, 0.);

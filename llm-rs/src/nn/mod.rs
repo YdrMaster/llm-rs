@@ -7,25 +7,29 @@ pub mod layer_norm;
 pub mod linear;
 pub mod loss;
 
-use crate::{blob::Blob, context::Context};
+use crate::{
+    blob::Blob,
+    context::Context,
+    vm::{TestVM, VirtualMachine},
+};
 use std::rc::Rc;
 
-type Tensor = crate::Tensor<rw_rc::RwRc<Blob>>;
+pub type Tensor_ = crate::Tensor<rw_rc::RwRc<Blob>>;
 
-pub trait NeuralNetwork {
+pub trait NeuralNetwork<VM: VirtualMachine> {
     type Init;
 
-    fn init(init: Self::Init, ctx: &mut Context) -> Self;
+    fn init(init: Self::Init, ctx: &mut Context<VM>) -> Self;
 
     fn forward(
         &mut self,
-        inputs: impl IntoIterator<Item = Rc<Tensor>>,
-        ctx: &mut Context,
-    ) -> Vec<Rc<Tensor>>;
+        inputs: impl IntoIterator<Item = Rc<VM::Tensor>>,
+        ctx: &mut Context<VM>,
+    ) -> Vec<Rc<VM::Tensor>>;
 
     fn backward(
         &mut self,
-        inputs: impl IntoIterator<Item = Rc<Tensor>>,
-        ctx: &mut Context,
-    ) -> Vec<Rc<Tensor>>;
+        inputs: impl IntoIterator<Item = Rc<VM::Tensor>>,
+        ctx: &mut Context<VM>,
+    ) -> Vec<Rc<VM::Tensor>>;
 }

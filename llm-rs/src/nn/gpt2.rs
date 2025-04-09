@@ -1,8 +1,8 @@
 ﻿use super::{
-    NeuralNetwork, Tensor, embedding::Embedding, gpt2_blk::Gpt2Blk, layer_norm::LayerNorm,
+    NeuralNetwork, Tensor_, TestVM, embedding::Embedding, gpt2_blk::Gpt2Blk, layer_norm::LayerNorm,
     linear::Linear,
 };
-use crate::{Blob, Context, llmc};
+use crate::{Blob, TestContext, llmc};
 use rw_rc::RwRc;
 use std::rc::Rc;
 
@@ -23,10 +23,10 @@ pub struct Gpt2 {
     lm_head: Linear,
 }
 
-impl NeuralNetwork for Gpt2 {
+impl NeuralNetwork<TestVM> for Gpt2 {
     type Init = llmc::Gpt2<RwRc<Blob>>;
 
-    fn init(init: Self::Init, ctx: &mut Context) -> Self {
+    fn init(init: Self::Init, ctx: &mut TestContext) -> Self {
         let Self::Init {
             config,
             wte,
@@ -43,7 +43,7 @@ impl NeuralNetwork for Gpt2 {
             .enumerate()
             .map(|(i, blk)| ctx.init(BLK(i), (blk, config.nh)))
             .collect();
-        let output_norm = ctx.init(OUTPUT_NORM, output_norm.map(Tensor::share));
+        let output_norm = ctx.init(OUTPUT_NORM, output_norm.map(Tensor_::share));
         let lm_head = ctx.init(LM_HEAD, (wte, None));
 
         Self {
@@ -56,9 +56,9 @@ impl NeuralNetwork for Gpt2 {
 
     fn forward(
         &mut self,
-        inputs: impl IntoIterator<Item = Rc<Tensor>>,
-        ctx: &mut Context,
-    ) -> Vec<Rc<Tensor>> {
+        inputs: impl IntoIterator<Item = Rc<Tensor_>>,
+        ctx: &mut TestContext,
+    ) -> Vec<Rc<Tensor_>> {
         let Self {
             embedding,
             blks,
@@ -79,9 +79,9 @@ impl NeuralNetwork for Gpt2 {
 
     fn backward(
         &mut self,
-        inputs: impl IntoIterator<Item = Rc<Tensor>>,
-        ctx: &mut Context,
-    ) -> Vec<Rc<Tensor>> {
+        inputs: impl IntoIterator<Item = Rc<Tensor_>>,
+        ctx: &mut TestContext,
+    ) -> Vec<Rc<Tensor_>> {
         let Self {
             embedding,
             blks,
