@@ -6,6 +6,7 @@ pub mod gemm;
 pub mod layer_norm;
 pub mod linear;
 pub mod loss;
+pub mod rearrange;
 
 type Tensor = crate::Tensor<rw_rc::RwRc<crate::Blob>>;
 
