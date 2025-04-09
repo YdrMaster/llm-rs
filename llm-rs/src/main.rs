@@ -2,6 +2,7 @@ mod blob;
 mod context;
 mod llmc;
 mod nn;
+mod op;
 mod optimizer;
 
 use std::{hash::Hash, rc::Weak};
