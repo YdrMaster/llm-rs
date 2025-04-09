@@ -1,8 +1,8 @@
-use super::{Tensor, unique};
+use super::{Tensor, gemm::mat_mul, rearrange, unique};
+
 use crate::macros::*;
 use digit_layout::types;
-use gemm::{Parallelism::Rayon, gemm};
-use mem_rearrange::Rearranging;
+
 use std::iter::zip;
 
 pub fn forward(y: &Tensor, x: &Tensor, weight: &Tensor, bias: Option<&Tensor>) {
@@ -26,40 +26,13 @@ pub fn forward(y: &Tensor, x: &Tensor, weight: &Tensor, bias: Option<&Tensor>) {
         dims!([n__] = bias);
         assert_eq!(n_, n__);
 
-        unsafe {
-            Rearranging::new(
-                y.layout(),
-                &bias.layout().tile_be(0, &[1, n]).broadcast(0, m),
-                dt.nbytes(),
-            )
-            .unwrap()
-            .launch(y.get().write().as_mut_ptr(), bias.get().read().as_ptr())
-        }
+        let bias = bias.tile(0, &[1, n]).broadcast(0, m);
+
+        rearrange::rearrange(&y, &bias);
     }
 
-    unsafe {
-        gemm::<f32>(
-            m,
-            n,
-            k,
-            y.as_ref().map(|b| &mut **b.write()).mut_ptr(),
-            1,
-            n as isize,
-            bias.is_some(),
-            x.as_ref().map(|b| &**b.read()).ptr(),
-            1,
-            k as isize,
-            weight.as_ref().map(|b| &**b.read()).ptr(),
-            k as isize,
-            1,
-            1.,
-            1.,
-            false,
-            false,
-            false,
-            Rayon(0),
-        )
-    }
+    let _ = y.as_ref().map(|b| b.release());
+    mat_mul(&y, 1.0, &x, &weight.transpose(&[1, 0]), bias.map(|_| 1.0));
 }
 
 pub fn backward(
@@ -82,29 +55,7 @@ pub fn backward(
     assert_eq!(n, n_);
     assert_eq!(k, k_);
 
-    unsafe {
-        gemm::<f32>(
-            m,
-            n,
-            k,
-            dx.as_ref().map(|b| &mut **b.write()).mut_ptr(),
-            1,
-            n as _,
-            false,
-            dy.as_ref().map(|b| &**b.read()).ptr(),
-            1,
-            k as _,
-            w.as_ref().map(|b| &**b.read()).ptr(),
-            1,
-            n as _,
-            1.,
-            1.,
-            false,
-            false,
-            false,
-            Rayon(0),
-        )
-    };
+    mat_mul(&dx, 1.0, &dy, &w, None);
 
     dims!([m, n] = dw);
     dims!([k, m_] = dy);
@@ -113,29 +64,7 @@ pub fn backward(
     assert_eq!(n, n_);
     assert_eq!(k, k_);
 
-    unsafe {
-        gemm::<f32>(
-            m,
-            n,
-            k,
-            dw.as_ref().map(|b| &mut **b.write()).mut_ptr(),
-            1,
-            n as _,
-            false,
-            dy.as_ref().map(|b| &**b.read()).ptr(),
-            m as _,
-            1,
-            x.as_ref().map(|b| &**b.read()).ptr(),
-            1,
-            n as _,
-            1.,
-            1.,
-            false,
-            false,
-            false,
-            Rayon(0),
-        )
-    }
+    mat_mul(&dw, 1.0, &dy.clone().transpose(&[1, 0]), &x, None);
 
     if let Some(db) = db {
         clone_tensor!(db);
