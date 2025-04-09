@@ -1,8 +1,8 @@
-﻿use super::{
+use super::{
     NeuralNetwork, Tensor, attention::Attention, gelu::Gelu, layer_norm::LayerNorm, linear::Linear,
     macros::destruct,
 };
-use crate::{Blob, Context, llmc, nn::macros::clone_tensor};
+use crate::{Blob, Context, llmc, op::add::add};
 use rw_rc::RwRc;
 use std::rc::Rc;
 
@@ -154,20 +154,5 @@ impl NeuralNetwork for Gpt2Blk {
         add(&d, &dresidual);
 
         vec![d]
-    }
-}
-
-fn add(y: &Tensor, x: &Tensor) {
-    clone_tensor!(y x);
-
-    assert_eq!(y.shape(), x.shape());
-    let ndim = y.layout().ndim();
-    let y = y.as_ref().merge(0, ndim);
-    let x = x.as_ref().merge(0, ndim);
-    for (y, x) in std::iter::zip(
-        y.map(|t| &mut **t.write()).vector_mut::<f32>(),
-        x.map(|t| &**t.write()).vector::<f32>(),
-    ) {
-        *y += x
     }
 }

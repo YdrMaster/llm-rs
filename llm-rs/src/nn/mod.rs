@@ -30,18 +30,6 @@ pub trait NeuralNetwork {
     ) -> Vec<Rc<Tensor>>;
 }
 
-fn unique<T: Copy + Eq>(vals: &[T]) -> Option<T> {
-    let [val, tail @ ..] = vals else {
-        return None;
-    };
-    for v in tail {
-        if v != val {
-            return None;
-        }
-    }
-    Some(*val)
-}
-
 mod macros {
     macro_rules! dims {
         ($pat:pat = $tensor:expr) => {
