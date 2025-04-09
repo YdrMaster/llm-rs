@@ -1,13 +1,12 @@
-﻿use super::{NeuralNetwork, macros::*, unique};
-use crate::{Blob, Context, Tensor};
+﻿use super::{NeuralNetwork, Tensor, macros::*, unique};
+use crate::Context;
 use digit_layout::types;
-use std::iter::zip;
-use tensor::rw_rc::RwRc;
+use std::{iter::zip, rc::Rc};
 
 pub struct Loss {
     n_voc: usize,
-    targets: Option<RwRc<Tensor<Blob>>>,
-    probs: Option<Tensor<Blob>>,
+    targets: Option<Rc<Tensor>>,
+    probs: Option<Tensor>,
 }
 
 impl NeuralNetwork for Loss {
@@ -23,9 +22,9 @@ impl NeuralNetwork for Loss {
 
     fn forward(
         &mut self,
-        inputs: impl IntoIterator<Item = RwRc<Tensor<Blob>>>,
+        inputs: impl IntoIterator<Item = Rc<Tensor>>,
         ctx: &mut Context,
-    ) -> Vec<RwRc<Tensor<Blob>>> {
+    ) -> Vec<Rc<Tensor>> {
         destruct!([logits, targets] = inputs);
         self.targets.replace(targets);
         let Self {
@@ -34,14 +33,13 @@ impl NeuralNetwork for Loss {
             ..
         } = self;
 
-        let targets = targets.as_ref().unwrap().read();
-        let logits = logits.read();
+        let targets = targets.as_ref().unwrap();
 
-        let mut probs = Tensor::contiguous_of(logits).map(Blob::new);
-        softmax(probs.as_deref_mut(), logits.as_deref(), *nvoc);
+        let probs = ctx.tensor(logits.dt(), &logits.shape());
+        softmax(&probs, &logits, *nvoc);
 
-        let mut losses = ctx.tensor(probs.dt(), &targets.shape());
-        crossentropy(losses.as_deref_mut(), probs.as_deref(), targets.as_deref());
+        let losses = ctx.tensor(probs.dt(), &targets.shape());
+        crossentropy(&losses, &probs, targets);
 
         self.probs.replace(probs);
         vec![losses.share()]
@@ -49,27 +47,24 @@ impl NeuralNetwork for Loss {
 
     fn backward(
         &mut self,
-        inputs: impl IntoIterator<Item = RwRc<Tensor<Blob>>>,
-        _ctx: &mut Context,
-    ) -> Vec<RwRc<Tensor<Blob>>> {
+        inputs: impl IntoIterator<Item = Rc<Tensor>>,
+        ctx: &mut Context,
+    ) -> Vec<Rc<Tensor>> {
         destruct!([dlosses] = inputs);
         let Self { targets, probs, .. } = self;
 
         let probs = probs.take().unwrap();
-        let mut dlogits = Tensor::contiguous_of(&probs).map(Blob::new_zeroed);
+        let dlogits = ctx.tensor_zeroed(probs.dt(), &probs.shape());
 
-        backward(
-            dlogits.as_deref_mut(),
-            dlosses.read().as_deref(),
-            probs.as_deref(),
-            targets.take().unwrap().read().as_deref(),
-        );
+        backward(&dlogits, &dlosses, &probs, &targets.take().unwrap());
 
         vec![dlogits.share()]
     }
 }
 
-fn softmax(mut y: Tensor<&mut [u8]>, x: Tensor<&[u8]>, mask: usize) {
+fn softmax(y: &Tensor, x: &Tensor, mask: usize) {
+    clone_tensor!(y x);
+
     let dt = unique(&[y.dt(), x.dt()]).unwrap();
     assert_eq!(dt, types::F32);
 
@@ -81,8 +76,16 @@ fn softmax(mut y: Tensor<&mut [u8]>, x: Tensor<&[u8]>, mask: usize) {
 
     for b in 0..batch_size {
         for t in 0..n_seq {
-            let y = y.as_deref_mut().index(&[b, t]).vector_mut::<f32>();
-            let x = x.as_deref().index(&[b, t]).vector::<f32>();
+            let y = y
+                .as_ref()
+                .index(&[b, t])
+                .map(|b| &mut **b.write())
+                .vector_mut::<f32>();
+            let x = x
+                .as_ref()
+                .index(&[b, t])
+                .map(|b| &**b.read())
+                .vector::<f32>();
 
             let (y, tail) = y.split_at_mut(mask);
             let x = &x[..mask];
@@ -102,7 +105,12 @@ fn softmax(mut y: Tensor<&mut [u8]>, x: Tensor<&[u8]>, mask: usize) {
     }
 }
 
-fn crossentropy(mut losses: Tensor<&mut [u8]>, probs: Tensor<&[u8]>, targets: Tensor<&[u8]>) {
+fn crossentropy(losses: &Tensor, probs: &Tensor, targets: &Tensor) {
+    clone_tensor! {
+        losses
+        probs
+    }
+
     assert_eq!(unique(&[losses.dt(), probs.dt()]).unwrap(), types::F32);
     assert_eq!(targets.dt(), types::U16);
 
@@ -115,20 +123,34 @@ fn crossentropy(mut losses: Tensor<&mut [u8]>, probs: Tensor<&[u8]>, targets: Te
 
     for b in 0..batch_size {
         for t in 0..n_seq {
-            let losses = losses.as_deref_mut().index(&[b, t]).scalar_mut::<f32>();
-            let probs = probs.as_deref().index(&[b, t]).vector::<f32>();
-            let target = targets.as_deref().index(&[b, t]).scalar::<u16>();
+            let losses = losses
+                .as_ref()
+                .index(&[b, t])
+                .map(|b| &mut **b.write())
+                .scalar_mut::<f32>();
+            let probs = probs
+                .as_ref()
+                .index(&[b, t])
+                .map(|b| &**b.read())
+                .vector::<f32>();
+            let target = targets
+                .as_ref()
+                .index(&[b, t])
+                .map(|b| &**b.read())
+                .scalar::<u16>();
             *losses = -probs[*target as usize].ln()
         }
     }
 }
 
-fn backward(
-    mut dlogits: Tensor<&mut [u8]>,
-    dlosses: Tensor<&[u8]>,
-    probs: Tensor<&[u8]>,
-    targets: Tensor<&[u8]>,
-) {
+fn backward(dlogits: &Tensor, dlosses: &Tensor, probs: &Tensor, targets: &Tensor) {
+    clone_tensor! {
+        dlogits
+        dlosses
+        probs
+        targets
+    }
+
     let dt = unique(&[dlogits.dt(), dlosses.dt(), probs.dt()]).unwrap();
     assert_eq!(dt, types::F32);
     assert_eq!(targets.dt(), types::U16);
@@ -144,10 +166,26 @@ fn backward(
 
     for b in 0..batch_size {
         for t in 0..n_seq {
-            let dlogits = dlogits.as_deref_mut().index(&[b, t]).vector_mut::<f32>();
-            let probs = probs.as_deref().index(&[b, t]).vector::<f32>();
-            let dloss = *dlosses.as_deref().index(&[b, t]).scalar::<f32>();
-            let ix = *targets.as_deref().index(&[b, t]).scalar::<u16>() as usize;
+            let dlogits = dlogits
+                .as_ref()
+                .index(&[b, t])
+                .map(|b| &mut **b.write())
+                .vector_mut::<f32>();
+            let probs = probs
+                .as_ref()
+                .index(&[b, t])
+                .map(|b| &**b.read())
+                .vector::<f32>();
+            let dloss = *dlosses
+                .as_ref()
+                .index(&[b, t])
+                .map(|b| &**b.read())
+                .scalar::<f32>();
+            let ix = *targets
+                .as_ref()
+                .index(&[b, t])
+                .map(|b| &**b.read())
+                .scalar::<u16>() as usize;
             for (i, (dlogit, prob)) in zip(dlogits, probs).enumerate() {
                 let indicator = if i == ix { 1. } else { 0. };
                 *dlogit += (prob - indicator) * dloss

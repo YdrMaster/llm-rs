@@ -327,6 +327,7 @@ dependencies = [
  "memmap2",
  "rand",
  "rayon",
+ "rw-rc",
  "tensor",
 ]
 
@@ -599,7 +600,6 @@ version = "0.0.0"
 dependencies = [
  "digit-layout",
  "ndarray-layout",
- "rw-rc",
 ]
 
 [[package]]

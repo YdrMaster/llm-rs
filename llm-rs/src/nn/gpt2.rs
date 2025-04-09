@@ -1,8 +1,10 @@
 ﻿use super::{
-    NeuralNetwork, embedding::Embedding, gpt2_blk::Gpt2Blk, layer_norm::LayerNorm, linear::Linear,
+    NeuralNetwork, Tensor, embedding::Embedding, gpt2_blk::Gpt2Blk, layer_norm::LayerNorm,
+    linear::Linear,
 };
-use crate::{Blob, Context, Tensor, llmc};
-use tensor::rw_rc::RwRc;
+use crate::{Blob, Context, llmc};
+use rw_rc::RwRc;
+use std::rc::Rc;
 
 const EMBEDDING: &str = "embedding";
 
@@ -22,7 +24,7 @@ pub struct Gpt2 {
 }
 
 impl NeuralNetwork for Gpt2 {
-    type Init = llmc::Gpt2<Blob>;
+    type Init = llmc::Gpt2<RwRc<Blob>>;
 
     fn init(init: Self::Init, ctx: &mut Context) -> Self {
         let Self::Init {
@@ -54,9 +56,9 @@ impl NeuralNetwork for Gpt2 {
 
     fn forward(
         &mut self,
-        inputs: impl IntoIterator<Item = RwRc<Tensor<Blob>>>,
+        inputs: impl IntoIterator<Item = Rc<Tensor>>,
         ctx: &mut Context,
-    ) -> Vec<RwRc<Tensor<Blob>>> {
+    ) -> Vec<Rc<Tensor>> {
         let Self {
             embedding,
             blks,
@@ -77,9 +79,9 @@ impl NeuralNetwork for Gpt2 {
 
     fn backward(
         &mut self,
-        inputs: impl IntoIterator<Item = RwRc<Tensor<Blob>>>,
+        inputs: impl IntoIterator<Item = Rc<Tensor>>,
         ctx: &mut Context,
-    ) -> Vec<RwRc<Tensor<Blob>>> {
+    ) -> Vec<Rc<Tensor>> {
         let Self {
             embedding,
             blks,

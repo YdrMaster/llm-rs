@@ -5,6 +5,7 @@ edition.workspace = true
 authors = ["YdrMaster <ydrml@hotmail.com>"]
 
 [dependencies]
+rw-rc.path = "../rw-rc"
 tensor.path = "../tensor"
 
 digit-layout = "0.3"

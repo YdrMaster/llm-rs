@@ -1,22 +1,21 @@
-﻿use crate::{Blob, Tensor, nn::NeuralNetwork, optimizer::Optimizer};
+﻿use crate::{Blob, HashWeak, Tensor, nn::NeuralNetwork, optimizer::Optimizer};
 use digit_layout::DigitLayout;
+use rw_rc::RwRc;
 use std::{
     collections::{HashMap, HashSet},
+    rc::Rc,
     time::Instant,
 };
-use tensor::rw_rc::{RwRc, RwWeak};
 
 pub struct Context {
     path: String,
-    weights: HashMap<WeakWeight, WeightInfo>,
+    weights: HashMap<HashWeak<Tensor<RwRc<Blob>>>, WeightInfo>,
     bench: bool,
 }
 
-type WeakWeight = RwWeak<Tensor<Blob>>;
-
 #[derive(Default)]
 struct WeightInfo {
-    gradient: Option<RwRc<Tensor<Blob>>>,
+    gradient: Option<Rc<Tensor<RwRc<Blob>>>>,
     names: HashSet<String>,
 }
 
@@ -46,17 +45,21 @@ impl Context {
     pub fn write_gradient(
         &mut self,
         name: &str,
-        weight: &RwRc<Tensor<Blob>>,
-    ) -> RwRc<Tensor<Blob>> {
+        weight: &Rc<Tensor<RwRc<Blob>>>,
+    ) -> Rc<Tensor<RwRc<Blob>>> {
         // 注册权重
-        let info = self.weights.entry(weight.weak()).or_default();
+        let info = self
+            .weights
+            .entry(HashWeak(Rc::downgrade(weight)))
+            .or_default();
         // 记录名字
         info.names.insert(format!("{}:{name}", self.path));
         // 生成或取出梯度
         info.gradient
             .get_or_insert_with(|| {
-                Tensor::contiguous_of(weight.read())
+                Tensor::contiguous_of(weight)
                     .map(Blob::new_zeroed)
+                    .map(RwRc::new)
                     .share()
             })
             .clone()
@@ -70,7 +73,7 @@ impl Context {
 
     pub fn update(&self, optimizer: &mut impl Optimizer) {
         for (weak, info) in &self.weights {
-            let weight = weak.hold().unwrap();
+            let weight = weak.0.upgrade().unwrap();
             let gradient = info.gradient.clone().unwrap();
             optimizer.update(weight, gradient)
         }
@@ -86,8 +89,8 @@ impl Context {
         &mut self,
         name: impl AsRef<str>,
         nn: &mut NN,
-        inputs: impl IntoIterator<Item = RwRc<Tensor<Blob>>>,
-    ) -> Vec<RwRc<Tensor<Blob>>> {
+        inputs: impl IntoIterator<Item = Rc<Tensor<RwRc<Blob>>>>,
+    ) -> Vec<Rc<Tensor<RwRc<Blob>>>> {
         self.trap(name, |ctx| nn.forward(inputs, ctx))
     }
 
@@ -95,17 +98,17 @@ impl Context {
         &mut self,
         name: impl AsRef<str>,
         nn: &mut NN,
-        inputs: impl IntoIterator<Item = RwRc<Tensor<Blob>>>,
-    ) -> Vec<RwRc<Tensor<Blob>>> {
+        inputs: impl IntoIterator<Item = Rc<Tensor<RwRc<Blob>>>>,
+    ) -> Vec<Rc<Tensor<RwRc<Blob>>>> {
         self.trap(name, |ctx| nn.backward(inputs, ctx))
     }
 
-    pub fn tensor(&self, dt: DigitLayout, shape: &[usize]) -> Tensor<Blob> {
-        Tensor::new(dt, shape).map(Blob::new)
+    pub fn tensor(&self, dt: DigitLayout, shape: &[usize]) -> Tensor<RwRc<Blob>> {
+        Tensor::new(dt, shape).map(Blob::new).map(RwRc::new)
     }
 
-    pub fn tensor_zeroed(&self, dt: DigitLayout, shape: &[usize]) -> Tensor<Blob> {
-        Tensor::new(dt, shape).map(Blob::new_zeroed)
+    pub fn tensor_zeroed(&self, dt: DigitLayout, shape: &[usize]) -> Tensor<RwRc<Blob>> {
+        Tensor::new(dt, shape).map(Blob::new_zeroed).map(RwRc::new)
     }
 
     pub fn bench(&self, f: impl FnOnce()) {

@@ -1,16 +1,16 @@
-﻿use super::{NeuralNetwork, macros::*, unique};
-use crate::{Blob, Context, Tensor};
+﻿use super::{NeuralNetwork, Tensor, macros::*, unique};
+use crate::Context;
 use digit_layout::types;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use std::{
     f32::consts::PI,
     ops::{AddAssign, Mul},
+    rc::Rc,
     sync::LazyLock,
 };
-use tensor::rw_rc::RwRc;
 
 pub struct Gelu {
-    x: Option<RwRc<Tensor<Blob>>>,
+    x: Option<Rc<Tensor>>,
 }
 
 impl NeuralNetwork for Gelu {
@@ -22,43 +22,39 @@ impl NeuralNetwork for Gelu {
 
     fn forward(
         &mut self,
-        inputs: impl IntoIterator<Item = RwRc<Tensor<Blob>>>,
+        inputs: impl IntoIterator<Item = Rc<Tensor>>,
         ctx: &mut Context,
-    ) -> Vec<RwRc<Tensor<Blob>>> {
+    ) -> Vec<Rc<Tensor>> {
         destruct!([x] = inputs);
         self.x.replace(x);
         let Self { x } = self;
 
-        let x = x.as_ref().unwrap().read();
-        let mut y = Tensor::contiguous_of(x).map(Blob::new);
+        let x = x.as_ref().unwrap();
+        let y = ctx.tensor(x.dt(), &x.shape());
 
-        {
-            let y = y.as_deref_mut().merge(0, 2);
-            let x = x.as_deref().merge(0, 2);
-            ctx.bench(|| forward::gelu(y, x))
-        }
+        ctx.bench(|| forward::gelu(&y.clone().merge(0, 2), &x.cloned().merge(0, 2)));
 
         vec![y.share()]
     }
 
     fn backward(
         &mut self,
-        inputs: impl IntoIterator<Item = RwRc<Tensor<Blob>>>,
+        inputs: impl IntoIterator<Item = Rc<Tensor>>,
         ctx: &mut Context,
-    ) -> Vec<RwRc<Tensor<Blob>>> {
+    ) -> Vec<Rc<Tensor>> {
         destruct!([dy] = inputs);
         let Self { x } = self;
 
         let x = x.take().unwrap();
-        let x = x.read();
-        let mut dx = Tensor::contiguous_of(x).map(Blob::new_zeroed);
+        let dx = ctx.tensor_zeroed(x.dt(), &x.shape());
 
-        {
-            let dx = dx.as_deref_mut().merge(0, 2);
-            let x = x.as_deref().merge(0, 2);
-            let dy = dy.read().as_deref().merge(0, 2);
-            ctx.bench(|| backward::gelu(dx, x, dy))
-        }
+        ctx.bench(|| {
+            backward::gelu(
+                &dx.clone().merge(0, 2),
+                &x.cloned().merge(0, 2),
+                &dy.cloned().merge(0, 2),
+            )
+        });
 
         vec![dx.share()]
     }
@@ -94,7 +90,9 @@ impl GeluData for f32 {
 mod forward {
     use super::*;
 
-    pub(super) fn gelu(mut y: Tensor<&mut [u8]>, x: Tensor<&[u8]>) {
+    pub(super) fn gelu(y: &Tensor, x: &Tensor) {
+        clone_tensor!(y x);
+
         dims!([n, d] = y);
         dims!([n_, d_] = x);
 
@@ -111,8 +109,8 @@ mod forward {
             d,
             sy: [nsy, dsy],
             sx: [nsx, dsx],
-            y: y.mut_ptr(),
-            x: x.ptr(),
+            y: y.as_ref().map(|b| &mut **b.write()).mut_ptr(),
+            x: x.as_ref().map(|b| &**b.read()).ptr(),
         };
 
         match dt {
@@ -151,7 +149,9 @@ mod forward {
 mod backward {
     use super::*;
 
-    pub(super) fn gelu(mut dx: Tensor<&mut [u8]>, x: Tensor<&[u8]>, dy: Tensor<&[u8]>) {
+    pub(super) fn gelu(dx: &Tensor, x: &Tensor, dy: &Tensor) {
+        clone_tensor!(dx x dy);
+
         dims!([n0, d0] = dx);
         dims!([n1, d1] = x);
         dims!([n2, d2] = dy);
@@ -170,9 +170,9 @@ mod backward {
             sdx: [nsdx, dsdx],
             sx: [nsx, dsx],
             sdy: [nsdy, dsdy],
-            dx: dx.mut_ptr(),
-            x: x.ptr(),
-            dy: dy.ptr(),
+            dx: dx.as_ref().map(|b| &mut **b.write()).mut_ptr(),
+            x: x.as_ref().map(|b| &**b.read()).ptr(),
+            dy: dy.as_ref().map(|b| &**b.read()).ptr(),
         };
 
         match dt {

@@ -1,14 +1,13 @@
-﻿use super::{NeuralNetwork, macros::*, unique};
-use crate::{Blob, Context, Tensor};
+﻿use super::{NeuralNetwork, Tensor, macros::*, unique};
+use crate::Context;
 use digit_layout::types;
 use itertools::izip;
-use std::{iter::zip, slice::from_raw_parts_mut};
-use tensor::rw_rc::RwRc;
+use std::{iter::zip, rc::Rc, slice::from_raw_parts_mut};
 
 pub struct Attention {
     nh: usize,
-    x: Option<RwRc<Tensor<Blob>>>,
-    att: Option<Tensor<Blob>>,
+    x: Option<Rc<Tensor>>,
+    att: Option<Tensor>,
 }
 
 impl NeuralNetwork for Attention {
@@ -24,29 +23,22 @@ impl NeuralNetwork for Attention {
 
     fn forward(
         &mut self,
-        inputs: impl IntoIterator<Item = RwRc<Tensor<Blob>>>,
+        inputs: impl IntoIterator<Item = Rc<Tensor>>,
         ctx: &mut Context,
-    ) -> Vec<RwRc<Tensor<Blob>>> {
+    ) -> Vec<Rc<Tensor>> {
         destruct!([x] = inputs);
         self.x.replace(x);
         let Self { nh, x, .. } = self;
 
-        let x = x.as_ref().unwrap().read();
+        let x = x.as_ref().unwrap();
         dims!([batch_size, n_seq, d3] = x);
 
         let d = d3 / 3;
-        let mut y = ctx.tensor_zeroed(x.dt(), &[batch_size, n_seq, d]);
-        let mut preatt = ctx.tensor_zeroed(x.dt(), &[batch_size, *nh, n_seq, n_seq]);
-        let mut att = ctx.tensor_zeroed(x.dt(), &[batch_size, *nh, n_seq, n_seq]);
+        let y = ctx.tensor_zeroed(x.dt(), &[batch_size, n_seq, d]);
+        let preatt = ctx.tensor_zeroed(x.dt(), &[batch_size, *nh, n_seq, n_seq]);
+        let att = ctx.tensor_zeroed(x.dt(), &[batch_size, *nh, n_seq, n_seq]);
 
-        ctx.bench(|| {
-            forward(
-                y.as_deref_mut(),
-                preatt.as_deref_mut(),
-                att.as_deref_mut(),
-                x.as_deref(),
-            )
-        });
+        ctx.bench(|| forward(&y, &preatt, &att, x));
 
         self.att.replace(att);
 
@@ -55,41 +47,28 @@ impl NeuralNetwork for Attention {
 
     fn backward(
         &mut self,
-        inputs: impl IntoIterator<Item = RwRc<Tensor<Blob>>>,
+        inputs: impl IntoIterator<Item = Rc<Tensor>>,
         ctx: &mut Context,
-    ) -> Vec<RwRc<Tensor<Blob>>> {
+    ) -> Vec<Rc<Tensor>> {
         destruct!([dy] = inputs);
         let Self { x, att, .. } = self;
 
         let x = x.take().unwrap();
-        let x = x.read();
-        let mut dx = Tensor::contiguous_of(x).map(Blob::new_zeroed);
+        let dx = ctx.tensor_zeroed(x.dt(), &x.shape());
 
         let att = att.take().unwrap();
-        let mut dpreatt = Tensor::contiguous_of(&att).map(Blob::new_zeroed);
-        let mut datt = Tensor::contiguous_of(&att).map(Blob::new_zeroed);
+        let dpreatt = ctx.tensor_zeroed(att.dt(), &att.shape());
+        let datt = ctx.tensor_zeroed(att.dt(), &att.shape());
 
-        ctx.bench(|| {
-            backward(
-                dx.as_deref_mut(),
-                dpreatt.as_deref_mut(),
-                datt.as_deref_mut(),
-                dy.read().as_deref(),
-                x.as_deref(),
-                att.as_deref(),
-            )
-        });
+        ctx.bench(|| backward(&dx, &dpreatt, &datt, &dy, &x, &att));
 
         vec![dx.share()]
     }
 }
 
-fn forward(
-    mut y: Tensor<&mut [u8]>,
-    mut preatt: Tensor<&mut [u8]>,
-    mut att: Tensor<&mut [u8]>,
-    x: Tensor<&[u8]>,
-) {
+fn forward(y: &Tensor, preatt: &Tensor, att: &Tensor, x: &Tensor) {
+    clone_tensor!(y preatt att x);
+
     let dt = unique(&[y.dt(), preatt.dt(), att.dt(), x.dt()]).unwrap();
     assert_eq!(dt, types::F32);
 
@@ -106,24 +85,44 @@ fn forward(
     let scale = (dh as f32).powf(-0.5);
 
     for b in 0..batch_size {
-        let qkv = x.as_deref().index(&[b]);
+        let qkv = x.as_ref().index(&[b]);
         for t in 0..n_seq {
-            let q = qkv.as_deref().index(&[t]).vector::<f32>();
-            let y = y.as_deref_mut().index(&[b, t]).vector_mut::<f32>();
+            let q = qkv
+                .as_deref()
+                .index(&[t])
+                .map(|b| &**b.read())
+                .vector::<f32>();
+            let y = y
+                .as_ref()
+                .index(&[b, t])
+                .map(|b| &mut **b.write())
+                .vector_mut::<f32>();
 
             for h in 0..nh {
                 let y = &mut y[h * dh..][..dh];
                 let q = &q[h * dh..][..dh];
 
-                let preatt = preatt.as_deref_mut().index(&[b, h, t]).vector_mut::<f32>();
-                let att = att.as_deref_mut().index(&[b, h, t]).vector_mut::<f32>();
+                let preatt = preatt
+                    .as_ref()
+                    .index(&[b, h, t])
+                    .map(|b| &mut **b.write())
+                    .vector_mut::<f32>();
+                let att = att
+                    .as_ref()
+                    .index(&[b, h, t])
+                    .map(|b| &mut **b.write())
+                    .vector_mut::<f32>();
                 let (preatt, _) = preatt.split_at_mut(t + 1);
                 let (att, tail) = att.split_at_mut(t + 1);
 
                 // pass 1: calculate query dot key and maxval
                 let mut max = f32::NEG_INFINITY;
                 for (t_, val) in preatt.iter_mut().enumerate() {
-                    let k = &qkv.as_deref().index(&[t_]).vector::<f32>()[d..][h * dh..][..dh];
+                    let k = &qkv
+                        .as_deref()
+                        .index(&[t_])
+                        .map(|b| &**b.read())
+                        .vector::<f32>()[d..][h * dh..][..dh];
                     *val = zip(q, k).map(|(&q, &k)| q * k).sum::<f32>() * scale;
                     if *val > max {
                         max = *val
@@ -147,7 +146,11 @@ fn forward(
                 // pass 4: accumulate weighted values into the output of attention
                 y.fill(0.);
                 for (t_, val) in att.iter_mut().enumerate() {
-                    let v = &qkv.as_deref().index(&[t_]).vector::<f32>()[d * 2..][h * dh..][..dh];
+                    let v = &qkv
+                        .as_ref()
+                        .index(&[t_])
+                        .map(|b| &**b.read())
+                        .vector::<f32>()[d * 2..][h * dh..][..dh];
                     for (y, v) in zip(&mut *y, v) {
                         *y += *val * v
                     }
@@ -157,14 +160,9 @@ fn forward(
     }
 }
 
-fn backward(
-    mut dx: Tensor<&mut [u8]>,
-    mut dpreatt: Tensor<&mut [u8]>,
-    mut datt: Tensor<&mut [u8]>,
-    dy: Tensor<&[u8]>,
-    x: Tensor<&[u8]>,
-    att: Tensor<&[u8]>,
-) {
+fn backward(dx: &Tensor, dpreatt: &Tensor, datt: &Tensor, dy: &Tensor, x: &Tensor, att: &Tensor) {
+    clone_tensor!(dx dpreatt datt dy x att);
+
     let dt = unique(&[dx.dt(), dpreatt.dt(), datt.dt(), dy.dt(), x.dt(), att.dt()]).unwrap();
     assert_eq!(dt, types::F32);
 
@@ -197,17 +195,37 @@ fn backward(
     for b in 0..batch_size {
         for t in 0..n_seq {
             for h in 0..nh {
-                let mut dx = dx.as_deref_mut().index(&[b]);
-                let x = x.as_deref().index(&[b]);
+                let dx = dx.as_ref().index(&[b]);
+                let x = x.as_ref().index(&[b]);
 
-                let dpreatt = dpreatt.as_deref_mut().index(&[b, h, t]).vector_mut::<f32>();
-                let datt = datt.as_deref_mut().index(&[b, h, t]).vector_mut::<f32>();
-                let dy = &dy.as_deref().index(&[b, t]).vector::<f32>()[h * dh..][..dh];
-                let att = att.as_deref().index(&[b, h, t]).vector::<f32>();
+                let dpreatt = dpreatt
+                    .as_ref()
+                    .index(&[b, h, t])
+                    .map(|b| &mut **b.write())
+                    .vector_mut::<f32>();
+                let datt = datt
+                    .as_ref()
+                    .index(&[b, h, t])
+                    .map(|b| &mut **b.write())
+                    .vector_mut::<f32>();
+                let dy = &dy
+                    .as_ref()
+                    .index(&[b, t])
+                    .map(|b| &**b.read())
+                    .vector::<f32>()[h * dh..][..dh];
+                let att = att
+                    .as_ref()
+                    .index(&[b, h, t])
+                    .map(|b| &**b.read())
+                    .vector::<f32>();
 
                 for t_ in 0..=t {
-                    let dqkv = dx.as_deref_mut().index(&[t_]).vector_mut::<f32>();
-                    let qkv = x.as_deref().index(&[t_]).vector::<f32>();
+                    let dqkv = dx
+                        .as_ref()
+                        .index(&[t_])
+                        .map(|b| &mut **b.write())
+                        .vector_mut::<f32>();
+                    let qkv = x.as_ref().index(&[t_]).map(|b| &**b.read()).vector::<f32>();
 
                     let dv = &mut dqkv[2 * d..][h * dh..][..dh];
                     let v = &qkv[2 * d..][h * dh..][..dh];
@@ -226,8 +244,12 @@ fn backward(
                     }
                 }
 
-                let dqkv = dx.as_deref_mut().merge(0, 2).vector_mut::<f32>();
-                let qkv = x.as_deref().merge(0, 2).vector::<f32>();
+                let dqkv = dx
+                    .as_ref()
+                    .merge(0, 2)
+                    .map(|b| &mut **b.write())
+                    .vector_mut::<f32>();
+                let qkv = x.as_ref().merge(0, 2).map(|b| &**b.read()).vector::<f32>();
 
                 let dq =
                     unsafe { from_raw_parts_mut(dqkv[t * 3 * d..][h * dh..].as_mut_ptr(), dh) };

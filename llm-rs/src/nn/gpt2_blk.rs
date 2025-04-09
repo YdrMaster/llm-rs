@@ -1,9 +1,10 @@
 ﻿use super::{
-    NeuralNetwork, attention::Attention, gelu::Gelu, layer_norm::LayerNorm, linear::Linear,
+    NeuralNetwork, Tensor, attention::Attention, gelu::Gelu, layer_norm::LayerNorm, linear::Linear,
     macros::destruct,
 };
-use crate::{Blob, Context, Tensor, llmc};
-use tensor::rw_rc::RwRc;
+use crate::{Blob, Context, llmc, nn::macros::clone_tensor};
+use rw_rc::RwRc;
+use std::rc::Rc;
 
 const ATTN_NORM: &str = "attn_norm";
 const ATTN_QKV: &str = "attn_qkv";
@@ -26,7 +27,7 @@ pub struct Gpt2Blk {
 }
 
 impl NeuralNetwork for Gpt2Blk {
-    type Init = (llmc::Gpt2Blk<Blob>, usize);
+    type Init = (llmc::Gpt2Blk<RwRc<Blob>>, usize);
 
     fn init(init: Self::Init, ctx: &mut Context) -> Self {
         let llmc::Gpt2Blk {
@@ -38,7 +39,7 @@ impl NeuralNetwork for Gpt2Blk {
             ffn_down,
         } = init.0;
 
-        fn share(arr: [Tensor<Blob>; 2]) -> [RwRc<Tensor<Blob>>; 2] {
+        fn share(arr: [Tensor; 2]) -> [Rc<Tensor>; 2] {
             arr.map(|t| t.share())
         }
 
@@ -76,9 +77,9 @@ impl NeuralNetwork for Gpt2Blk {
 
     fn forward(
         &mut self,
-        inputs: impl IntoIterator<Item = RwRc<Tensor<Blob>>>,
+        inputs: impl IntoIterator<Item = Rc<Tensor>>,
         ctx: &mut Context,
-    ) -> Vec<RwRc<Tensor<Blob>>> {
+    ) -> Vec<Rc<Tensor>> {
         let Self {
             attn_norm,
             attn_qkv,
@@ -99,8 +100,7 @@ impl NeuralNetwork for Gpt2Blk {
         let x = ctx.forward(ATTN_O, attn_o, x);
 
         destruct!([x] = x);
-        add(x.write().as_deref_mut(), residual.read().as_deref());
-        x.release();
+        add(&x, &residual);
         let residual = x;
 
         let x = [residual.clone()];
@@ -110,17 +110,16 @@ impl NeuralNetwork for Gpt2Blk {
         let x = ctx.forward(FFN_DOWN, ffn_down, x);
 
         destruct!([x] = x);
-        add(x.write().as_deref_mut(), residual.read().as_deref());
-        x.release();
+        add(&x, &residual);
 
         vec![x]
     }
 
     fn backward(
         &mut self,
-        inputs: impl IntoIterator<Item = RwRc<Tensor<Blob>>>,
+        inputs: impl IntoIterator<Item = Rc<Tensor>>,
         ctx: &mut Context,
-    ) -> Vec<RwRc<Tensor<Blob>>> {
+    ) -> Vec<Rc<Tensor>> {
         let Self {
             attn_norm,
             attn_qkv,
@@ -142,8 +141,7 @@ impl NeuralNetwork for Gpt2Blk {
         let d = ctx.backward(FFN_NORM, ffn_norm, d);
 
         destruct!([d] = d);
-        add(d.write().as_deref_mut(), dresidual.read().as_deref());
-        d.release();
+        add(&d, &dresidual);
         let dresidual = d;
 
         let d = [dresidual.clone()];
@@ -153,19 +151,23 @@ impl NeuralNetwork for Gpt2Blk {
         let d = ctx.backward(ATTN_NORM, attn_norm, d);
 
         destruct!([d] = d);
-        add(d.write().as_deref_mut(), dresidual.read().as_deref());
-        d.release();
+        add(&d, &dresidual);
 
         vec![d]
     }
 }
 
-fn add(y: Tensor<&mut [u8]>, x: Tensor<&[u8]>) {
+fn add(y: &Tensor, x: &Tensor) {
+    clone_tensor!(y x);
+
     assert_eq!(y.shape(), x.shape());
     let ndim = y.layout().ndim();
-    let y = y.merge(0, ndim).vector_mut::<f32>();
-    let x = x.merge(0, ndim).vector::<f32>();
-    for (y, x) in std::iter::zip(y, x) {
+    let y = y.as_ref().merge(0, ndim);
+    let x = x.as_ref().merge(0, ndim);
+    for (y, x) in std::iter::zip(
+        y.map(|t| &mut **t.write()).vector_mut::<f32>(),
+        x.map(|t| &**t.write()).vector::<f32>(),
+    ) {
         *y += x
     }
 }

@@ -4,8 +4,11 @@ mod llmc;
 mod nn;
 mod optimizer;
 
+use std::{hash::Hash, rc::Weak};
+
 use blob::Blob;
 use context::Context;
+use rw_rc::RwRc;
 
 type Tensor<T> = tensor::Tensor<T, 4>;
 
@@ -44,7 +47,7 @@ fn main() {
     let n_voc = gpt2.config.n_voc;
 
     let mut ctx = Context::new(false);
-    let mut gpt2 = ctx.init::<nn::gpt2::Gpt2>("gpt2", gpt2.map(Blob::from));
+    let mut gpt2 = ctx.init::<nn::gpt2::Gpt2>("gpt2", gpt2.map(Blob::from).map(RwRc::new));
     let mut loss = ctx.init::<nn::loss::Loss>("loss", n_voc);
     let mut adamw = AdamW::new(1e-4, 0.9, 0.999, 1e-8, 0.);
 
@@ -56,13 +59,13 @@ fn main() {
                 let [inputs, targets] = val_loader.load();
 
                 let shape = [batch_size, seq_len];
-                let tokens = Tensor::new(types::U16, &shape).map(|_| inputs.into());
-                let targets = Tensor::new(types::U16, &shape).map(|_| targets.into());
+                let tokens = Tensor::new(types::U16, &shape).map(|_| RwRc::new(inputs.into()));
+                let targets = Tensor::new(types::U16, &shape).map(|_| RwRc::new(targets.into()));
 
                 let logits = ctx.forward("gpt2", &mut gpt2, [tokens.share()]);
                 let losses = ctx.forward("loss", &mut loss, [logits[0].clone(), targets.share()]);
 
-                val_loss += loss_sum(losses[0].read().as_deref())
+                val_loss += loss_sum(losses[0].cloned().as_ref().map(|b| &**b.read()))
             }
             val_loss /= 5.;
             println!("val_loss: {val_loss}")
@@ -72,10 +75,12 @@ fn main() {
             println!("-----------");
             let mut tokens = vec![tokenizer.eos; batch_size * seq_len];
             for t in 1..64 {
-                let tokens_ =
-                    Tensor::new(types::U16, &[batch_size, seq_len]).map(|_| Blob::from(&*tokens));
+                let tokens_ = Tensor::new(types::U16, &[batch_size, seq_len])
+                    .map(|_| Blob::from(&*tokens))
+                    .map(RwRc::new);
                 let logits = ctx.forward("gpt2", &mut gpt2, [tokens_.share()]);
-                let logits = logits[0].read().as_deref().index(&[0, t - 1]).vector();
+                let logits = logits[0].cloned().index(&[0, t - 1]);
+                let logits = logits.as_ref().map(|b| &**b.read()).vector();
                 let next = sample(&logits[..n_voc], rand::random());
                 tokens[t] = next as u16;
                 safe_print(tokenizer.decode(next as u16))
@@ -89,19 +94,22 @@ fn main() {
         let [inputs, targets] = train_loader.load();
 
         let shape = [batch_size, seq_len];
-        let tokens = Tensor::new(types::U16, &shape).map(|_| inputs.into());
-        let targets = Tensor::new(types::U16, &shape).map(|_| targets.into());
+        let tokens = Tensor::new(types::U16, &shape).map(|_| RwRc::new(inputs.into()));
+        let targets = Tensor::new(types::U16, &shape).map(|_| RwRc::new(targets.into()));
 
         let logits = ctx.forward("gpt2", &mut gpt2, [tokens.share()]);
         let losses = ctx.forward("loss", &mut loss, [logits[0].clone(), targets.share()]);
-        let train_loss = loss_sum(losses[0].read().as_deref());
+        let train_loss = loss_sum(losses[0].cloned().as_ref().map(|b| &**b.read()));
         ctx.zero_grad();
 
         let dloss_mean = 1. / (batch_size * seq_len) as f32;
-        let mut dlosses = Tensor::contiguous_of(losses[0].read()).map(Blob::new);
+        let loss_ = &losses[0];
+        let dlosses = ctx.tensor(loss_.dt(), &loss_.shape());
         dlosses
-            .as_deref_mut()
+            .cloned()
             .merge(0, 2)
+            .as_ref()
+            .map(|b| &mut **b.write())
             .vector_mut::<f32>()
             .fill(dloss_mean);
 
@@ -144,4 +152,20 @@ fn sample(logits: &[f32], coin: f32) -> u16 {
         }
     }
     unreachable!()
+}
+
+struct HashWeak<T>(Weak<T>);
+
+impl<T> PartialEq for HashWeak<T> {
+    fn eq(&self, other: &Self) -> bool {
+        Weak::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl<T> Eq for HashWeak<T> {}
+
+impl<T> Hash for HashWeak<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.0.as_ptr().hash(state)
+    }
 }

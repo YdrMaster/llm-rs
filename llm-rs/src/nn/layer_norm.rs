@@ -1,19 +1,19 @@
-﻿use super::{NeuralNetwork, macros::*, unique};
-use crate::{Blob, Context, Tensor};
+﻿use super::{NeuralNetwork, Tensor, macros::*, unique};
+use crate::Context;
 use digit_layout::types;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
-use tensor::rw_rc::RwRc;
+use std::rc::Rc;
 
 pub struct LayerNorm {
-    w: RwRc<Tensor<Blob>>,
-    b: RwRc<Tensor<Blob>>,
-    x: Option<RwRc<Tensor<Blob>>>,
-    mean: Option<Tensor<Blob>>,
-    rstd: Option<Tensor<Blob>>,
+    w: Rc<Tensor>,
+    b: Rc<Tensor>,
+    x: Option<Rc<Tensor>>,
+    mean: Option<Tensor>,
+    rstd: Option<Tensor>,
 }
 
 impl NeuralNetwork for LayerNorm {
-    type Init = [RwRc<Tensor<Blob>>; 2];
+    type Init = [Rc<Tensor>; 2];
 
     fn init(init: Self::Init, _ctx: &mut Context) -> Self {
         let [scalar, bias] = init;
@@ -28,28 +28,28 @@ impl NeuralNetwork for LayerNorm {
 
     fn forward(
         &mut self,
-        inputs: impl IntoIterator<Item = RwRc<Tensor<Blob>>>,
+        inputs: impl IntoIterator<Item = Rc<Tensor>>,
         ctx: &mut Context,
-    ) -> Vec<RwRc<Tensor<Blob>>> {
+    ) -> Vec<Rc<Tensor>> {
         destruct!([x] = inputs);
         self.x.replace(x);
         let Self { w, b, x, .. } = self;
 
-        let x = x.as_ref().unwrap().read();
+        let x = x.as_ref().unwrap();
         dims!([batch_size, n_seq, d] = x);
 
-        let mut y = ctx.tensor(x.dt(), &[batch_size, n_seq, d]);
-        let mut mean = ctx.tensor(x.dt(), &[batch_size, n_seq]);
-        let mut rstd = ctx.tensor(x.dt(), &[batch_size, n_seq]);
+        let y = ctx.tensor(x.dt(), &[batch_size, n_seq, d]);
+        let mean = ctx.tensor(x.dt(), &[batch_size, n_seq]);
+        let rstd = ctx.tensor(x.dt(), &[batch_size, n_seq]);
 
         ctx.bench(|| {
             forward::layer_norm(
-                y.as_deref_mut().merge(0, 2),
-                mean.as_deref_mut().merge(0, 2),
-                rstd.as_deref_mut().merge(0, 2),
-                x.as_deref().merge(0, 2),
-                w.read().as_deref(),
-                b.read().as_deref(),
+                &y.cloned().merge(0, 2),
+                &mean.cloned().merge(0, 2),
+                &rstd.cloned().merge(0, 2),
+                &x.cloned().merge(0, 2),
+                w,
+                b,
             )
         });
 
@@ -61,9 +61,9 @@ impl NeuralNetwork for LayerNorm {
 
     fn backward(
         &mut self,
-        inputs: impl IntoIterator<Item = RwRc<Tensor<Blob>>>,
+        inputs: impl IntoIterator<Item = Rc<Tensor>>,
         ctx: &mut Context,
-    ) -> Vec<RwRc<Tensor<Blob>>> {
+    ) -> Vec<Rc<Tensor>> {
         destruct!([dy] = inputs);
         let Self {
             w,
@@ -74,26 +74,22 @@ impl NeuralNetwork for LayerNorm {
         } = self;
 
         let x = x.take().unwrap();
-        let x = x.read();
-        let mut dx = Tensor::contiguous_of(x).map(Blob::new_zeroed);
+        let dx = ctx.tensor_zeroed(x.dt(), &x.shape());
 
         let dw = ctx.write_gradient("w", w);
         let db = ctx.write_gradient("b", b);
         ctx.bench(|| {
             backward::layer_norm(
-                dx.as_deref_mut().merge(0, 2),
-                dw.write().as_deref_mut(),
-                db.write().as_deref_mut(),
-                dy.read().as_deref().merge(0, 2),
-                x.as_deref().merge(0, 2),
-                w.read().as_deref(),
-                mean.take().unwrap().as_deref().merge(0, 2),
-                rstd.take().unwrap().as_deref().merge(0, 2),
+                &dx.cloned().merge(0, 2),
+                &dw,
+                &db,
+                &dy.cloned().merge(0, 2),
+                &x.cloned().merge(0, 2),
+                w,
+                &mean.take().unwrap().merge(0, 2),
+                &rstd.take().unwrap().merge(0, 2),
             )
         });
-
-        w.release();
-        b.release();
 
         vec![dx.share()]
     }
@@ -103,13 +99,15 @@ mod forward {
     use super::*;
 
     pub(super) fn layer_norm(
-        mut y: Tensor<&mut [u8]>,
-        mut mean: Tensor<&mut [u8]>,
-        mut rstd: Tensor<&mut [u8]>,
-        x: Tensor<&[u8]>,
-        scalar: Tensor<&[u8]>,
-        bias: Tensor<&[u8]>,
+        y: &Tensor,
+        mean: &Tensor,
+        rstd: &Tensor,
+        x: &Tensor,
+        scalar: &Tensor,
+        bias: &Tensor,
     ) {
+        clone_tensor!(y mean rstd x scalar bias);
+
         let dt = unique(&[y.dt(), mean.dt(), rstd.dt(), x.dt(), scalar.dt(), bias.dt()]).unwrap();
         assert_eq!(dt, types::F32);
 
@@ -139,12 +137,12 @@ mod forward {
             sr: [nsr],
             sw: [sw],
             sb: [sb],
-            y: y.mut_ptr(),
-            x: x.ptr(),
-            mean: mean.mut_ptr(),
-            rstd: rstd.mut_ptr(),
-            scalar: scalar.ptr(),
-            bias: bias.ptr(),
+            y: y.as_ref().map(|b| &mut **b.write()).mut_ptr(),
+            x: x.as_ref().map(|b| &**b.read()).ptr(),
+            mean: mean.as_ref().map(|b| &mut **b.write()).mut_ptr(),
+            rstd: rstd.as_ref().map(|b| &mut **b.write()).mut_ptr(),
+            scalar: scalar.as_ref().map(|b| &**b.read()).ptr(),
+            bias: bias.as_ref().map(|b| &**b.read()).ptr(),
         };
 
         match dt {
@@ -171,17 +169,14 @@ mod forward {
     }
 
     impl Scheme {
-        fn compute<
+        fn compute<T>(&self)
+        where
+            f32: From<T>,
             T: Copy
                 + std::ops::Add<Output = T>
                 + std::ops::Mul<Output = T>
                 + std::ops::Sub<Output = T>
-                + std::fmt::Debug,
-        >(
-            &self,
-        ) where
-            f32: From<T>,
-            T: From<f32>,
+                + From<f32>,
         {
             let &Self {
                 n,
@@ -276,15 +271,17 @@ mod backward {
 
     #[allow(clippy::too_many_arguments)]
     pub(super) fn layer_norm(
-        mut dx: Tensor<&mut [u8]>,
-        mut dw: Tensor<&mut [u8]>,
-        mut db: Tensor<&mut [u8]>,
-        dy: Tensor<&[u8]>,
-        x: Tensor<&[u8]>,
-        w: Tensor<&[u8]>,
-        mean: Tensor<&[u8]>,
-        rstd: Tensor<&[u8]>,
+        dx: &Tensor,
+        dw: &Tensor,
+        db: &Tensor,
+        dy: &Tensor,
+        x: &Tensor,
+        w: &Tensor,
+        mean: &Tensor,
+        rstd: &Tensor,
     ) {
+        clone_tensor!(dx dw db dy x w mean rstd);
+
         let dt = unique(&[
             dx.dt(),
             dw.dt(),
@@ -330,14 +327,14 @@ mod backward {
             sw: [w_s],
             sm: [nsm],
             sr: [nsr],
-            dx: dx.mut_ptr(),
-            dy: dy.ptr(),
-            x: x.ptr(),
-            dw: dw.mut_ptr(),
-            db: db.mut_ptr(),
-            w: w.ptr(),
-            mean: mean.ptr(),
-            rstd: rstd.ptr(),
+            dx: dx.as_ref().map(|b| &mut **b.write()).mut_ptr(),
+            dy: dy.as_ref().map(|b| &**b.read()).ptr(),
+            x: x.as_ref().map(|b| &**b.read()).ptr(),
+            dw: dw.as_ref().map(|b| &mut **b.write()).mut_ptr(),
+            db: db.as_ref().map(|b| &mut **b.write()).mut_ptr(),
+            w: w.as_ref().map(|b| &**b.read()).ptr(),
+            mean: mean.as_ref().map(|b| &**b.read()).ptr(),
+            rstd: rstd.as_ref().map(|b| &**b.read()).ptr(),
         };
 
         match dt {
@@ -368,17 +365,15 @@ mod backward {
     }
 
     impl Scheme {
-        fn compute<
+        fn compute<T>(&self)
+        where
+            f32: From<T>,
             T: Copy
                 + std::ops::Add<Output = T>
                 + std::ops::AddAssign
                 + std::ops::Mul<Output = T>
-                + std::ops::Sub<Output = T>,
-        >(
-            &self,
-        ) where
-            f32: From<T>,
-            T: From<f32>,
+                + std::ops::Sub<Output = T>
+                + From<f32>,
         {
             let &Self {
                 n,

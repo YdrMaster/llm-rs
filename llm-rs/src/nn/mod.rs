@@ -7,8 +7,10 @@ pub mod layer_norm;
 pub mod linear;
 pub mod loss;
 
-use crate::{Tensor, blob::Blob, context::Context};
-use tensor::rw_rc::RwRc;
+use crate::{blob::Blob, context::Context};
+use std::rc::Rc;
+
+type Tensor = crate::Tensor<rw_rc::RwRc<Blob>>;
 
 pub trait NeuralNetwork {
     type Init;
@@ -17,15 +19,15 @@ pub trait NeuralNetwork {
 
     fn forward(
         &mut self,
-        inputs: impl IntoIterator<Item = RwRc<Tensor<Blob>>>,
+        inputs: impl IntoIterator<Item = Rc<Tensor>>,
         ctx: &mut Context,
-    ) -> Vec<RwRc<Tensor<Blob>>>;
+    ) -> Vec<Rc<Tensor>>;
 
     fn backward(
         &mut self,
-        inputs: impl IntoIterator<Item = RwRc<Tensor<Blob>>>,
+        inputs: impl IntoIterator<Item = Rc<Tensor>>,
         ctx: &mut Context,
-    ) -> Vec<RwRc<Tensor<Blob>>>;
+    ) -> Vec<Rc<Tensor>>;
 }
 
 fn unique<T: Copy + Eq>(vals: &[T]) -> Option<T> {
@@ -60,12 +62,16 @@ mod macros {
     macro_rules! destruct {
         ([$( $name:ident ),+] = $iter:expr) => {
             let mut iter = $iter.into_iter();
-            $(
-                let $name = iter.next().unwrap();
-            )+
+            $( let $name = iter.next().unwrap(); )+
             assert!(iter.next().is_none());
         };
     }
 
-    pub(super) use {destruct, dims, strides};
+    macro_rules! clone_tensor {
+        ($( $tensor:ident )+) => {
+            $( let $tensor = $tensor.cloned(); )+
+        };
+    }
+
+    pub(super) use {clone_tensor, destruct, dims, strides};
 }

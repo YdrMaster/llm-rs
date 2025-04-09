@@ -4,13 +4,11 @@ mod transform;
 
 use digit_layout::DigitLayout;
 use ndarray_layout::{ArrayLayout, Endian::BigEndian};
-use rw_rc::RwRc;
 use std::{
     borrow::Cow,
     ops::{Deref, DerefMut},
+    rc::Rc,
 };
-
-pub extern crate rw_rc;
 
 #[derive(Clone)]
 pub struct Tensor<T, const N: usize> {
@@ -56,7 +54,7 @@ impl<const N: usize> Tensor<usize, N> {
 }
 
 impl<T, const N: usize> Tensor<T, N> {
-    pub fn share(self) -> RwRc<Self> {
+    pub fn share(self) -> Rc<Self> {
         self.into()
     }
 
@@ -127,6 +125,16 @@ impl<T, const N: usize> Tensor<T, N> {
             dt,
             layout,
             data: f(data),
+        }
+    }
+}
+
+impl<T: Clone, const N: usize> Tensor<T, N> {
+    pub fn cloned(&self) -> Self {
+        Tensor {
+            dt: self.dt,
+            layout: self.layout.clone(),
+            data: self.data.clone(),
         }
     }
 }

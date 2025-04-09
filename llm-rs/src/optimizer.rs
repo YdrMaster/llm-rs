@@ -1,15 +1,15 @@
-﻿use crate::{Tensor, blob::Blob};
+﻿use crate::{HashWeak, Tensor, blob::Blob};
 use digit_layout::types;
 use itertools::izip;
-use std::collections::HashMap;
-use tensor::rw_rc::{RwRc, RwWeak};
+use rw_rc::RwRc;
+use std::{collections::HashMap, rc::Rc};
 
 pub trait Optimizer {
-    fn update(&mut self, weight: RwRc<Tensor<Blob>>, gradient: RwRc<Tensor<Blob>>);
+    fn update(&mut self, weight: Rc<Tensor<RwRc<Blob>>>, gradient: Rc<Tensor<RwRc<Blob>>>);
 }
 
 pub struct AdamW {
-    weights: HashMap<WeakWeight, State>,
+    weights: HashMap<HashWeak<Tensor<RwRc<Blob>>>, State>,
     learning_rate: f32,
     beta1: f32,
     beta2: f32,
@@ -18,15 +18,13 @@ pub struct AdamW {
     t: i32,
 }
 
-type WeakWeight = RwWeak<Tensor<Blob>>;
-
 struct State {
     m: Blob,
     v: Blob,
 }
 
 impl Optimizer for AdamW {
-    fn update(&mut self, weight: RwRc<Tensor<Blob>>, gradient: RwRc<Tensor<Blob>>) {
+    fn update(&mut self, weight: Rc<Tensor<RwRc<Blob>>>, gradient: Rc<Tensor<RwRc<Blob>>>) {
         let &mut Self {
             ref mut weights,
             learning_rate,
@@ -36,24 +34,28 @@ impl Optimizer for AdamW {
             weight_decay,
             t,
         } = self;
-        let State { m, v } = weights.entry(weight.weak()).or_insert_with(|| {
-            let len = Tensor::contiguous_of(weight.read()).take();
-            State {
-                m: Blob::new_zeroed(len),
-                v: Blob::new_zeroed(len),
-            }
-        });
-
-        let weight = weight.write();
-        let gradient = gradient.read();
+        let State { m, v } = weights
+            .entry(HashWeak(Rc::downgrade(&weight)))
+            .or_insert_with(|| {
+                let len = Tensor::contiguous_of(&*weight).take();
+                State {
+                    m: Blob::new_zeroed(len),
+                    v: Blob::new_zeroed(len),
+                }
+            });
 
         assert_eq!(weight.dt(), types::F32);
         assert_eq!(gradient.dt(), types::F32);
         assert_eq!(weight.shape(), gradient.shape());
 
         let ndim = weight.layout().ndim();
-        let weight = weight.as_deref_mut().merge(0, ndim).vector_mut::<f32>();
-        let gradient = gradient.as_deref().merge(0, ndim).vector::<f32>();
+        let weight = weight.cloned().merge(0, ndim);
+        let weight = weight
+            .as_ref()
+            .map(|b| &mut **b.write())
+            .vector_mut::<f32>();
+        let gradient = gradient.cloned().merge(0, ndim);
+        let gradient = gradient.as_ref().map(|b| &**b.read()).vector::<f32>();
         let ([], m, []) = (unsafe { m.align_to_mut::<f32>() }) else {
             unreachable!()
         };

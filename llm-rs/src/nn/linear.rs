@@ -1,19 +1,18 @@
-﻿use super::{NeuralNetwork, macros::*, unique};
-use crate::{Blob, Context, Tensor};
+﻿use super::{NeuralNetwork, Tensor, macros::*, unique};
+use crate::Context;
 use digit_layout::types;
 use gemm::{Parallelism::Rayon, gemm};
 use mem_rearrange::Rearranging;
-use std::iter::zip;
-use tensor::rw_rc::RwRc;
+use std::{iter::zip, rc::Rc};
 
 pub struct Linear {
-    w: RwRc<Tensor<Blob>>,
-    b: Option<RwRc<Tensor<Blob>>>,
-    x: Option<RwRc<Tensor<Blob>>>,
+    w: Rc<Tensor>,
+    b: Option<Rc<Tensor>>,
+    x: Option<Rc<Tensor>>,
 }
 
 impl NeuralNetwork for Linear {
-    type Init = (RwRc<Tensor<Blob>>, Option<RwRc<Tensor<Blob>>>);
+    type Init = (Rc<Tensor>, Option<Rc<Tensor>>);
 
     fn init(init: Self::Init, _ctx: &mut Context) -> Self {
         let (weight, bias) = init;
@@ -26,25 +25,24 @@ impl NeuralNetwork for Linear {
 
     fn forward(
         &mut self,
-        inputs: impl IntoIterator<Item = RwRc<Tensor<Blob>>>,
+        inputs: impl IntoIterator<Item = Rc<Tensor>>,
         ctx: &mut Context,
-    ) -> Vec<RwRc<Tensor<Blob>>> {
+    ) -> Vec<Rc<Tensor>> {
         destruct!([x] = inputs);
         self.x.replace(x);
         let Self { w, b, x } = self;
 
-        let x = x.as_ref().unwrap().read();
-        let w = w.read();
+        let x = x.as_deref().unwrap();
         dims!([batch_size, seq_len, _] = x);
         dims!([d, _] = w);
-        let mut y = ctx.tensor(x.dt(), &[batch_size, seq_len, d]);
+        let y = ctx.tensor(x.dt(), &[batch_size, seq_len, d]);
 
         ctx.bench(|| {
             forward(
-                y.as_deref_mut().merge(0, 2),
-                x.as_deref().merge(0, 2),
-                w.as_deref(),
-                b.as_ref().map(|t| t.read().as_deref()),
+                &y.clone().merge(0, 2),
+                &x.clone().merge(0, 2),
+                w,
+                b.as_deref(),
             )
         });
 
@@ -53,43 +51,34 @@ impl NeuralNetwork for Linear {
 
     fn backward(
         &mut self,
-        inputs: impl IntoIterator<Item = RwRc<Tensor<Blob>>>,
+        inputs: impl IntoIterator<Item = Rc<Tensor>>,
         ctx: &mut Context,
-    ) -> Vec<RwRc<Tensor<Blob>>> {
+    ) -> Vec<Rc<Tensor>> {
         destruct!([dy] = inputs);
         let Self { w, b, x } = self;
 
         let x = x.take().unwrap();
-        let x = x.read();
         let dw = ctx.write_gradient("w", w);
-        let mut dx = Tensor::contiguous_of(x).map(Blob::new_zeroed);
+        let dx = ctx.tensor_zeroed(x.dt(), &x.shape());
         let db = b.as_ref().map(|b| ctx.write_gradient("b", b));
         ctx.bench(|| {
             backward(
-                dx.as_deref_mut().merge(0, 2),
-                dw.write().as_deref_mut(),
-                db.as_ref().map(|t| t.write().as_deref_mut()),
-                dy.read().as_deref().merge(0, 2),
-                x.as_deref().merge(0, 2),
-                w.read().as_deref(),
+                &dx.clone().merge(0, 2),
+                &dw,
+                db.as_deref(),
+                &dy.cloned().merge(0, 2),
+                &x.cloned().merge(0, 2),
+                w,
             )
         });
-
-        w.release();
-        if let Some(b) = &b {
-            b.release()
-        }
 
         vec![dx.share()]
     }
 }
 
-fn forward(
-    mut y: Tensor<&mut [u8]>,
-    x: Tensor<&[u8]>,
-    weight: Tensor<&[u8]>,
-    bias: Option<Tensor<&[u8]>>,
-) {
+fn forward(y: &Tensor, x: &Tensor, weight: &Tensor, bias: Option<&Tensor>) {
+    clone_tensor!(y x weight);
+
     let dt = unique(&[y.dt(), x.dt(), weight.dt()]).unwrap();
     assert_eq!(dt, types::F32);
 
@@ -102,6 +91,8 @@ fn forward(
     assert_eq!(n, n_);
 
     if let Some(bias) = &bias {
+        clone_tensor!(bias);
+
         assert_eq!(bias.dt(), dt);
         dims!([n__] = bias);
         assert_eq!(n_, n__);
@@ -113,7 +104,7 @@ fn forward(
                 dt.nbytes(),
             )
             .unwrap()
-            .launch(y.get_mut().as_mut_ptr(), bias.get().as_ptr())
+            .launch(y.get().write().as_mut_ptr(), bias.get().read().as_ptr())
         }
     }
 
@@ -122,14 +113,14 @@ fn forward(
             m,
             n,
             k,
-            y.mut_ptr(),
+            y.as_ref().map(|b| &mut **b.write()).mut_ptr(),
             1,
             n as isize,
             bias.is_some(),
-            x.ptr(),
+            x.as_ref().map(|b| &**b.read()).ptr(),
             1,
             k as isize,
-            weight.ptr(),
+            weight.as_ref().map(|b| &**b.read()).ptr(),
             k as isize,
             1,
             1.,
@@ -142,14 +133,9 @@ fn forward(
     }
 }
 
-fn backward(
-    mut dx: Tensor<&mut [u8]>,
-    mut dw: Tensor<&mut [u8]>,
-    db: Option<Tensor<&mut [u8]>>,
-    dy: Tensor<&[u8]>,
-    x: Tensor<&[u8]>,
-    w: Tensor<&[u8]>,
-) {
+fn backward(dx: &Tensor, dw: &Tensor, db: Option<&Tensor>, dy: &Tensor, x: &Tensor, w: &Tensor) {
+    clone_tensor!(dx dw dy x w);
+
     let dt = unique(&[dx.dt(), dw.dt(), dy.dt(), x.dt(), w.dt()]).unwrap();
     assert_eq!(dt, types::F32);
 
@@ -165,14 +151,14 @@ fn backward(
             m,
             n,
             k,
-            dx.mut_ptr(),
+            dx.as_ref().map(|b| &mut **b.write()).mut_ptr(),
             1,
             n as _,
             false,
-            dy.ptr(),
+            dy.as_ref().map(|b| &**b.read()).ptr(),
             1,
             k as _,
-            w.ptr(),
+            w.as_ref().map(|b| &**b.read()).ptr(),
             1,
             n as _,
             1.,
@@ -196,14 +182,14 @@ fn backward(
             m,
             n,
             k,
-            dw.mut_ptr(),
+            dw.as_ref().map(|b| &mut **b.write()).mut_ptr(),
             1,
             n as _,
             false,
-            dy.ptr(),
+            dy.as_ref().map(|b| &**b.read()).ptr(),
             m as _,
             1,
-            x.ptr(),
+            x.as_ref().map(|b| &**b.read()).ptr(),
             1,
             n as _,
             1.,
@@ -215,16 +201,18 @@ fn backward(
         )
     }
 
-    if let Some(mut db) = db {
+    if let Some(db) = db {
+        clone_tensor!(db);
+
         assert_eq!(db.dt(), types::F32);
 
         dims!([n, d] = dy);
         dims!([d_] = db);
         assert_eq!(d, d_);
 
-        let db = db.vector_mut::<f32>();
+        let db = db.as_ref().map(|b| &mut **b.write()).vector_mut::<f32>();
         for i in 0..n {
-            let dy = dy.as_deref().index(&[i]).vector::<f32>();
+            let dy = dy.as_ref().index(&[i]).map(|b| &**b.read()).vector::<f32>();
             for (db, dy) in zip(&mut *db, dy) {
                 *db += dy
             }

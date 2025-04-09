@@ -1,16 +1,16 @@
-﻿use super::{NeuralNetwork, macros::*};
-use crate::{Blob, Context, Tensor};
+﻿use super::{NeuralNetwork, Tensor, macros::*};
+use crate::Context;
 use digit_layout::types;
-use tensor::rw_rc::RwRc;
+use std::rc::Rc;
 
 pub struct Embedding {
-    te: RwRc<Tensor<Blob>>,
-    pe: RwRc<Tensor<Blob>>,
-    tokens: Option<RwRc<Tensor<Blob>>>,
+    te: Rc<Tensor>,
+    pe: Rc<Tensor>,
+    tokens: Option<Rc<Tensor>>,
 }
 
 impl NeuralNetwork for Embedding {
-    type Init = [RwRc<Tensor<Blob>>; 2];
+    type Init = [Rc<Tensor>; 2];
 
     fn init(init: Self::Init, _ctx: &mut Context) -> Self {
         let [te, pe] = init;
@@ -23,43 +23,36 @@ impl NeuralNetwork for Embedding {
 
     fn forward(
         &mut self,
-        inputs: impl IntoIterator<Item = RwRc<Tensor<Blob>>>,
+        inputs: impl IntoIterator<Item = Rc<Tensor>>,
         ctx: &mut Context,
-    ) -> Vec<RwRc<Tensor<Blob>>> {
+    ) -> Vec<Rc<Tensor>> {
         destruct!([tokens] = inputs);
         self.tokens.replace(tokens);
         let Self { te, pe, tokens } = self;
-        let te = te.read();
-        let pe = pe.read();
-        let tokens = tokens.as_ref().unwrap().read();
+        let tokens = tokens.as_ref().unwrap();
 
         dims!([batch_size, n_seq] = tokens);
 
         dims!([_, d] = te);
-        let mut y = ctx.tensor(te.dt(), &[batch_size, n_seq, d]);
+        let y = ctx.tensor(te.dt(), &[batch_size, n_seq, d]);
 
-        let i1 = tokens.as_deref().merge(0, 2);
+        let i1 = tokens.cloned().merge(0, 2);
         let mut i2 = ctx.tensor(types::U16, &[batch_size * n_seq]);
-        build_pos(i2.get_mut(), BatchIter::new(batch_size, n_seq));
+        build_pos(
+            i2.get_mut().clone().write(),
+            BatchIter::new(batch_size, n_seq),
+        );
 
-        ctx.bench(|| {
-            forward::embedding(
-                y.as_deref_mut().merge(0, 2),
-                i1,
-                i2.as_deref(),
-                te.as_deref(),
-                pe.as_deref(),
-            )
-        });
+        ctx.bench(|| forward::embedding(&y.clone().merge(0, 2), &i1, &i2, te, pe));
 
         vec![y.share()]
     }
 
     fn backward(
         &mut self,
-        inputs: impl IntoIterator<Item = RwRc<Tensor<Blob>>>,
+        inputs: impl IntoIterator<Item = Rc<Tensor>>,
         ctx: &mut Context,
-    ) -> Vec<RwRc<Tensor<Blob>>> {
+    ) -> Vec<Rc<Tensor>> {
         destruct!([dy] = inputs);
         let Self { te, pe, tokens } = self;
 
@@ -67,22 +60,22 @@ impl NeuralNetwork for Embedding {
         let dtable2 = ctx.write_gradient("wpe", pe);
 
         let i1 = tokens.take().unwrap();
-        dims!([batch_size, n_seq] = i1.read());
+        dims!([batch_size, n_seq] = i1);
         let mut i2 = ctx.tensor(types::U16, &[batch_size * n_seq]);
-        build_pos(i2.get_mut(), BatchIter::new(batch_size, n_seq));
+        build_pos(
+            i2.get_mut().clone().write(),
+            BatchIter::new(batch_size, n_seq),
+        );
 
         ctx.bench(|| {
             backward::embedding(
-                dtable1.write().as_deref_mut(),
-                dtable2.write().as_deref_mut(),
-                dy.read().as_deref().merge(0, 2),
-                i1.read().as_deref().merge(0, 2),
-                i2.as_deref(),
+                &dtable1,
+                &dtable2,
+                &dy.cloned().merge(0, 2),
+                &i1.cloned().merge(0, 2),
+                &i2,
             )
         });
-
-        te.release();
-        pe.release();
 
         vec![]
     }
@@ -143,21 +136,20 @@ fn build_pos(buf: &mut [u8], nseqs: impl IntoIterator<Item = usize>) {
 }
 
 mod forward {
-    use super::Index;
-    use crate::{
-        Tensor,
-        nn::{macros::*, unique},
-    };
+    use super::{Index, Tensor};
+    use crate::nn::{macros::*, unique};
     use digit_layout::types;
     use std::{iter::zip, ops::Add};
 
     pub(super) fn embedding(
-        mut y: Tensor<&mut [u8]>,
-        i1: Tensor<&[u8]>,
-        i2: Tensor<&[u8]>,
-        table1: Tensor<&[u8]>,
-        table2: Tensor<&[u8]>,
+        y: &Tensor,
+        i1: &Tensor,
+        i2: &Tensor,
+        table1: &Tensor,
+        table2: &Tensor,
     ) {
+        clone_tensor!(y i1 i2 table1 table2);
+
         dims!([n0, d0] = y);
         dims!([n1] = i1);
         dims!([n2] = i2);
@@ -181,11 +173,11 @@ mod forward {
             n,
             d,
             nsy,
-            y: y.mut_ptr(),
-            i1: i1.ptr(),
-            i2: i2.ptr(),
-            table1: table1.ptr(),
-            table2: table2.ptr(),
+            y: y.as_ref().map(|b| &mut **b.write()).mut_ptr(),
+            i1: i1.as_ref().map(|b| &**b.read()).ptr(),
+            i2: i2.as_ref().map(|b| &**b.read()).ptr(),
+            table1: table1.as_ref().map(|b| &**b.read()).ptr(),
+            table2: table2.as_ref().map(|b| &**b.read()).ptr(),
         };
 
         match (y.dt(), i1.dt(), i2.dt()) {
@@ -232,21 +224,20 @@ mod forward {
 }
 
 mod backward {
-    use super::Index;
-    use crate::{
-        Tensor,
-        nn::{macros::*, unique},
-    };
+    use super::{Index, Tensor};
+    use crate::nn::{macros::*, unique};
     use digit_layout::types;
     use std::{iter::zip, ops::AddAssign};
 
     pub(super) fn embedding(
-        mut dtable1: Tensor<&mut [u8]>,
-        mut dtable2: Tensor<&mut [u8]>,
-        dy: Tensor<&[u8]>,
-        i1: Tensor<&[u8]>,
-        i2: Tensor<&[u8]>,
+        dtable1: &Tensor,
+        dtable2: &Tensor,
+        dy: &Tensor,
+        i1: &Tensor,
+        i2: &Tensor,
     ) {
+        clone_tensor!(dtable1 dtable2 dy i1 i2);
+
         dims!([_nt1, d1] = dtable1);
         dims!([_nt2, d2] = dtable2);
         dims!([n0, d0] = dy);
@@ -270,11 +261,11 @@ mod backward {
             n,
             d,
             nsy,
-            dtable1: dtable1.mut_ptr(),
-            dtable2: dtable2.mut_ptr(),
-            dy: dy.ptr(),
-            i1: i1.ptr(),
-            i2: i2.ptr(),
+            dtable1: dtable1.as_ref().map(|b| &mut **b.write()).mut_ptr(),
+            dtable2: dtable2.as_ref().map(|b| &mut **b.write()).mut_ptr(),
+            dy: dy.as_ref().map(|b| &**b.read()).ptr(),
+            i1: i1.as_ref().map(|b| &**b.read()).ptr(),
+            i2: i2.as_ref().map(|b| &**b.read()).ptr(),
         };
 
         match (dy.dt(), i1.dt(), i2.dt()) {
